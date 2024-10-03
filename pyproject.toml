@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "canviewer"
+dynamic = ["version"]
+description = "A CLI tool providing rich monitoring of CAN data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = []
+authors = [{ name = "Hedwyn", email = "bpestourie@gmail.com" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+  "rich",
+  "click",
+  "cantools",
+  "python-can",
+  "exhausterr@git+ssh://git@github.com/Hedwyn/exhausterr",
+]
+
+[project.urls]
+Documentation = "https://github.com/Hedwyn/python-canviewer#readme"
+Issues = "https://github.com/Hedwyn/python-canviewer/issues"
+Source = "https://github.com/Hedwyn/python-canviewer"
+
+[project.scripts]
+canviewer = "canviewer._entrypoints:canviewer"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.envs.default]
+dependencies = ["coverage[toml]>=6.5", "pytest"]
+
+[[tool.hatch.envs.all.matrix]]
+python = ["3.10", "3.11", "3.12", "3.13"]
+
+[tool.hatch.envs.types]
+dependencies = ["mypy"]
+
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/python_canviewer tests}"
+
+[tool.coverage.run]
+source_pkgs = ["python_canviewer", "tests"]
+branch = true
+parallel = true
+
+[tool.hatch.metadata]
+# Required to enable git+ssh dependencies
+allow-direct-references = true
