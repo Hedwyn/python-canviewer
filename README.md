@@ -30,12 +30,16 @@ Usage: canviewer [OPTIONS]
   shows the decoded data.
 
 Options:
-  -c, --channel TEXT     Name of the CAN channel to monitor
-  -d, --driver TEXT      Specifies which CAN driver to use if multiple
-                         available
-  -db, --databases TEXT  Path to .kcd files or to a folder containing kcd
-                         files
-  --help                 Show this message and exit.
+  -c, --channel TEXT             Name of the CAN channel to monitor
+  -d, --driver TEXT              Specifies which CAN driver to use if multiple
+                                 available
+  -db, --databases TEXT          Path to .kcd files or to a folder containing
+                                 kcd files
+  -f, --filters TEXT             Either a name or a numeric ID, only passed
+                                 messages will be displayed
+  -i, --ignore-unknown-messages  Hides messages that are not declared in one
+                                 of your databases
+  --help                         Show this message and exit.
 ```
 
 `canviewer` will show the latest data for every message received on your CAN bus.<br>
@@ -48,6 +52,12 @@ When passing a folder, `dbc` or `kcd` files will be automatically discovered in 
 
 If omitting the CAN channel the tool will use the default on your system: `can0` on Linux and `PCAN_USBBUS1` on Windows. You can specify the channel with `-c` flag. Same applies to the CAN driver, which can be passed with `-d`.
 
+### Filtering
+You can filter out unknown messages by passsing `-i`.<br>
+You can only display some selected messages by passing their name or ID to `-f` flag (flag can be passed multiple times):
+```
+canviewer -db my_db.kcd -f My_Message_Name
+``` 
 
 ## License
 
