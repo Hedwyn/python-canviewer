@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 from asyncio import Queue
 from typing import Union, ClassVar, cast
-from threading import Event
 import platform
 from dataclasses import dataclass
 from exhausterr.results import Result, Ok, Err
@@ -118,7 +117,6 @@ class CanMonitor:
         self._queue: Queue[Result[DecodedMessage, UnknownMessage]] = Queue()
         self._dbs = list(can_dbs)
         self._bus = bus
-        self.kill_switch = Event()
         # Starting the monitor
         self._loop.add_reader(self._bus, self.handler)
 

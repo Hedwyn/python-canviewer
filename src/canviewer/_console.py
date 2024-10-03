@@ -6,6 +6,7 @@ Tracks the message data and exports it as a renderable table.
 """
 
 from __future__ import annotations
+from typing import Iterable
 
 # 3rd-party
 from rich.table import Table
@@ -23,7 +24,11 @@ class MessageTable:
     Messages are sorted by IDs.
     """
 
-    def __init__(self, ignore_unknown_messages: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_unknown_messages: bool = False,
+        filters: Iterable[int | str] = (),
+    ) -> None:
         """
         Parameters
         ----------
@@ -32,6 +37,32 @@ class MessageTable:
         """
         self._ignore_unknown_messages = ignore_unknown_messages
         self._id_to_message: dict[int, Result[DecodedMessage, UnknownMessage]] = {}
+        self._id_filters = set((f for f in filters if isinstance(f, int)))
+        self._name_filters = set((f for f in filters if isinstance(f, str)))
+
+    def filter_message_id(self, can_id: int) -> bool:
+        """
+        Returns
+        -------
+        bool
+            Whether the message should be filtered in or out
+        """
+        if not self._id_filters:
+            return True
+
+        return can_id in self._id_filters
+
+    def filter_message_name(self, name: str) -> bool:
+        """
+        Returns
+        -------
+        bool
+            Whether the message should be filtered in or out
+        """
+        if not self._name_filters:
+            return True
+
+        return name in self._name_filters
 
     def update(self, message: Result[DecodedMessage, UnknownMessage]) -> None:
         """
@@ -53,8 +84,12 @@ class MessageTable:
         table.add_column("Name", style="magenta")
         table.add_column("Data", style="green")
         for can_id, result in self._id_to_message.items():
+            if not self.filter_message_id(can_id):
+                continue
             match result:
                 case Ok(decoded):
+                    if not self.filter_message_name(decoded.message_name):
+                        continue
                     table.add_row(
                         f"{can_id:08x}",
                         str(decoded.message_name),

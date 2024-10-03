@@ -10,6 +10,7 @@ automatically as package scripts.
 from __future__ import annotations
 
 # built-in
+from re import M
 from typing import Iterator, Iterable
 import can
 import asyncio
@@ -19,6 +20,7 @@ import cantools
 # 3rd-party
 import click
 from rich.live import Live
+from rich.console import Console
 from cantools.database.can import Database
 from exhausterr.results import Ok, Err
 
@@ -36,6 +38,7 @@ async def _canviewer(
     driver: str,
     databases: Iterable[Database],
     ignore_unknown_messages: bool,
+    message_filters: Iterable[int | str],
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -51,16 +54,18 @@ async def _canviewer(
     databases: Iterable[Database]
         The paths to .kcd files or to a folder containing kcd files
     """
-    message_table = MessageTable(ignore_unknown_messages=ignore_unknown_messages)
+    message_table = MessageTable(
+        ignore_unknown_messages=ignore_unknown_messages, filters=message_filters
+    )
+    console = Console()
     with can.Bus(interface=driver, channel=channel) as bus:
-        with Live(auto_refresh=False) as live:
+        with Live(console=console) as live:
             backend = CanMonitor(bus, *databases)
             while True:  # Ctrl + C to leave
                 message = await backend.queue.get()
                 message_table.update(message)
                 renderable_table = message_table.export()
                 live.update(renderable_table)
-                live.refresh()
 
 
 def collect_databases(*paths: str) -> Iterator[str]:
@@ -105,6 +110,14 @@ def collect_databases(*paths: str) -> Iterator[str]:
     help="Path to .kcd files or to a folder containing kcd files",
 )
 @click.option(
+    "-f",
+    "--filters",
+    default=(),
+    type=str,
+    multiple=True,
+    help="Either a name or a numeric ID, only passed messages will be displayed",
+)
+@click.option(
     "-i",
     "--ignore-unknown-messages",
     is_flag=True,
@@ -114,6 +127,7 @@ def canviewer(
     channel: str | None,
     driver: str | None,
     databases: Iterable[str],
+    filters: Iterable[str],
     ignore_unknown_messages: bool,
 ) -> None:
     """
@@ -137,9 +151,15 @@ def canviewer(
             case Err(error):
                 click.echo(str(error))
                 return
-
+    converted_filters: list[int | str] = [
+        int(f) if f.isnumeric() else f for f in filters
+    ]
     loaded_dbs: Iterable[Database] = map(
         cantools.database.load_file,  # type: ignore[arg-type]
         collect_databases(*databases),
     )
-    asyncio.run(_canviewer(channel, driver, loaded_dbs, ignore_unknown_messages))
+    asyncio.run(
+        _canviewer(
+            channel, driver, loaded_dbs, ignore_unknown_messages, converted_filters
+        )
+    )
