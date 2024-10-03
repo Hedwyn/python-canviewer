@@ -15,9 +15,14 @@
 Clone this repository and simply run `pip install .` at the root (preferrably in a virtual environment). This tool uses hatchling backend for building, you can consider using hatch as a frontend (`hatch shell`).<br>
 * **As a dependency of other packages**:<br>
 Add the following dependency to your `requirements.txt` or `pyproject.toml`:
+```shell
+  canviewer@git+ssh://git@github.com/Hedwyn/canviewer
 ```
-  canviewer@git+ssh://git@github.com/Hedwyn/canviewer",
+Or install directly with pip:
+```shell
+pip install canviewer@git+ssh://git@github.com/Hedwyn/canviewer
 ```
+
 Note that you need a valid git SSH access.
 
 ## Usage
