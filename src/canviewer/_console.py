@@ -5,13 +5,16 @@ Tracks the message data and exports it as a renderable table.
 @author: Baptiste Pestourie
 """
 
-
 from __future__ import annotations
+
 # 3rd-party
 from rich.table import Table
+from rich.pretty import Pretty
 from exhausterr.results import Result, Ok, Err
+
 # Local
 from ._monitor import UnknownMessage, DecodedMessage
+
 
 class MessageTable:
     """
@@ -45,7 +48,7 @@ class MessageTable:
         Table
             The current tracked data as a renderable table.
         """
-        table = Table(title="Messages")
+        table = Table(title="Messages", width=180, expand=True)
         table.add_column("ID", justify="right", style="cyan", no_wrap=True)
         table.add_column("Name", style="magenta")
         table.add_column("Data", style="green")
@@ -55,7 +58,7 @@ class MessageTable:
                     table.add_row(
                         f"{can_id:08x}",
                         str(decoded.message_name),
-                        str(decoded.data),
+                        Pretty(decoded.data),
                     )
                 case Err(UnknownMessage(can_id, msg)):
                     if self._ignore_unknown_messages:
