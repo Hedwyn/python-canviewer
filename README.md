@@ -42,9 +42,12 @@ Options:
                                  kcd files
   -f, --filters TEXT             Either a name or a numeric ID, only passed
                                  messages will be displayed
+  -s, --single-message TEXT      Tracks a single message, shows a custom table
+                                 with one column per signal
   -i, --ignore-unknown-messages  Hides messages that are not declared in one
                                  of your databases
   --help                         Show this message and exit.
+
 ```
 
 `canviewer` will show the latest data for every message received on your CAN bus.<br>

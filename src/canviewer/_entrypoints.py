@@ -39,6 +39,7 @@ async def _canviewer(
     databases: Iterable[Database],
     ignore_unknown_messages: bool,
     message_filters: Iterable[int | str],
+    single_message: str | None = None,
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -64,7 +65,14 @@ async def _canviewer(
             while True:  # Ctrl + C to leave
                 message = await backend.queue.get()
                 message_table.update(message)
-                renderable_table = message_table.export()
+                if single_message is not None:
+                    renderable_table = message_table.export_single_message(
+                        single_message
+                    )
+                    if renderable_table is None:
+                        continue
+                else:
+                    renderable_table = message_table.export()
                 live.update(renderable_table)
 
 
@@ -118,6 +126,13 @@ def collect_databases(*paths: str) -> Iterator[str]:
     help="Either a name or a numeric ID, only passed messages will be displayed",
 )
 @click.option(
+    "-s",
+    "--single-message",
+    type=str,
+    default=None,
+    help="Tracks a single message, shows a custom table with one column per signal",
+)
+@click.option(
     "-i",
     "--ignore-unknown-messages",
     is_flag=True,
@@ -128,6 +143,7 @@ def canviewer(
     driver: str | None,
     databases: Iterable[str],
     filters: Iterable[str],
+    single_message: str | None,
     ignore_unknown_messages: bool,
 ) -> None:
     """
@@ -160,6 +176,11 @@ def canviewer(
     )
     asyncio.run(
         _canviewer(
-            channel, driver, loaded_dbs, ignore_unknown_messages, converted_filters
+            channel,
+            driver,
+            loaded_dbs,
+            ignore_unknown_messages,
+            converted_filters,
+            single_message=single_message,
         )
     )
