@@ -63,6 +63,7 @@ class DecodedMessage:
 
     can_id: int
     message_name: str
+    binary: bytearray
     data: MessageDict
 
 
@@ -144,6 +145,7 @@ class CanMonitor:
                 decoded_msg = DecodedMessage(
                     can_id=can_id,
                     message_name=frame.name,
+                    binary=msg.data,
                     data=cast(MessageDict, decoded_data),
                 )
 

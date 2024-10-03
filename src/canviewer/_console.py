@@ -11,6 +11,7 @@ from typing import Iterable
 # 3rd-party
 from rich.table import Table
 from rich.pretty import Pretty
+from rich.box import DOUBLE
 from exhausterr.results import Result, Ok, Err
 
 # Local
@@ -72,6 +73,12 @@ class MessageTable:
         # overriding the last version or creating a new one if first encounter
         self._id_to_message[can_id] = message
 
+    def _format_binary_data(self, data: bytes | bytearray) -> str:
+        """
+        A simple string formatter for binary data
+        """
+        return " ".join((f"{b:02X}" for b in data))
+
     def export(self) -> Table:
         """
         Returns
@@ -79,10 +86,19 @@ class MessageTable:
         Table
             The current tracked data as a renderable table.
         """
-        table = Table(title="Messages", width=180, expand=True)
-        table.add_column("ID", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Name", style="magenta")
-        table.add_column("Data", style="green")
+        table = Table(
+            title="Messages",
+            width=180,
+            expand=True,
+            box=DOUBLE,
+            header_style="bold cyan",
+            title_style="bold underline green",
+        )
+        table.add_column("ID", justify="right", style="cyan")
+        table.add_column("Name", style="yellow")
+        table.add_column("Binary", style="green")
+        table.add_column("Decoded", style="blue")
+
         for can_id, result in self._id_to_message.items():
             if not self.filter_message_id(can_id):
                 continue
@@ -91,17 +107,19 @@ class MessageTable:
                     if not self.filter_message_name(decoded.message_name):
                         continue
                     table.add_row(
-                        f"{can_id:08x}",
+                        f"{can_id:08X}",
                         str(decoded.message_name),
+                        self._format_binary_data(decoded.binary),
                         Pretty(decoded.data),
                     )
                 case Err(UnknownMessage(can_id, msg)):
                     if self._ignore_unknown_messages:
                         continue
                     table.add_row(
-                        f"{can_id:08x}",
+                        f"{can_id:08X}",
                         "[Unknown]",
-                        " ".join((f"{b:02X}" for b in msg.data)),
+                        self._format_binary_data(msg.data),
+                        "",
                     )
 
         return table
