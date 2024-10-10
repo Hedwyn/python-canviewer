@@ -40,6 +40,7 @@ async def _canviewer(
     ignore_unknown_messages: bool,
     message_filters: Iterable[int | str],
     single_message: str | None = None,
+    record_signals: list[str] = [],
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -59,21 +60,32 @@ async def _canviewer(
         ignore_unknown_messages=ignore_unknown_messages, filters=message_filters
     )
     console = Console()
+
+    for message_signal in record_signals:
+        if not message_table.start_plot(message_signal):
+            click.echo(f"Invalid message signal: {message_signal}")
+            return
     with can.Bus(interface=driver, channel=channel) as bus:
         with Live(console=console) as live:
             backend = CanMonitor(bus, *databases)
             while True:  # Ctrl + C to leave
-                message = await backend.queue.get()
-                message_table.update(message)
-                if single_message is not None:
-                    renderable_table = message_table.export_single_message(
-                        single_message
-                    )
-                    if renderable_table is None:
-                        continue
-                else:
-                    renderable_table = message_table.export()
-                live.update(renderable_table)
+                try:
+                    message = await backend.queue.get()
+                    message_table.update(message)
+                    if single_message is not None:
+                        renderable_table = message_table.export_single_message(
+                            single_message
+                        )
+                        if renderable_table is None:
+                            continue
+                    else:
+                        renderable_table = message_table.export()
+                    live.update(renderable_table)
+                except KeyboardInterrupt:
+                    break
+
+    csv_paths = message_table.export_plots_to_csv()
+    click.echo(f"CSV files created: {csv_paths}")
 
 
 def collect_databases(*paths: str) -> Iterator[str]:
@@ -138,6 +150,16 @@ def collect_databases(*paths: str) -> Iterator[str]:
     is_flag=True,
     help="Hides messages that are not declared in one of your databases",
 )
+@click.option(
+    "-r",
+    "--record-signals",
+    multiple=True,
+    type=str,
+    help=(
+        "Records the values for a given signal, exports them to CSV on exiting.\n"
+        "You shall pass your target signal as message_name.signal_name"
+    ),
+)
 def canviewer(
     channel: str | None,
     driver: str | None,
@@ -145,6 +167,7 @@ def canviewer(
     filters: Iterable[str],
     single_message: str | None,
     ignore_unknown_messages: bool,
+    record_signals: list[str],
 ) -> None:
     """
     For every CAN ID found on the CAN bus,
@@ -182,5 +205,6 @@ def canviewer(
             ignore_unknown_messages,
             converted_filters,
             single_message=single_message,
+            record_signals=record_signals,
         )
     )

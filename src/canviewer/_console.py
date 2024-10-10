@@ -6,16 +6,31 @@ Tracks the message data and exports it as a renderable table.
 """
 
 from __future__ import annotations
-from typing import Iterable
+from typing import Iterable, ClassVar, Any
+from dataclasses import dataclass
 
 # 3rd-party
 from rich.table import Table
 from rich.pretty import Pretty
 from rich.box import DOUBLE
 from exhausterr.results import Result, Ok, Err
+from exhausterr.errors import Error
+
 
 # Local
 from ._monitor import UnknownMessage, DecodedMessage
+
+
+@dataclass
+class InvalidName(Error):
+    exception_cls: ClassVar[type[Exception]] = NameError
+    name: str
+
+
+@dataclass
+class InvalidType(Error):
+    exception_cls: ClassVar[type[Exception]] = ValueError
+    value: Any
 
 
 class MessageTable:
@@ -41,6 +56,55 @@ class MessageTable:
         self._name_to_message: dict[str, DecodedMessage] = {}
         self._id_filters = set((f for f in filters if isinstance(f, int)))
         self._name_filters = set((f for f in filters if isinstance(f, str)))
+        self._plots: dict[str, dict[str, list[float]]] = {}
+
+    def start_plot(self, message_signal_key: str) -> Result[None, InvalidName]:
+        """
+        Starts recording values for the message signal pair given.
+        Parameters
+        ----------
+        message_signal_key: str
+            Given as `message_name.signal_name`
+        
+        Returns
+        -------
+        Result[None, InvalidName]
+            Nothing if OK,
+            InvalidName if the message signal pair is invalid
+        """
+        try:
+            message, signal = message_signal_key.split(".")
+        except ValueError:
+            return Err(InvalidName(message_signal_key))
+        self._plots.setdefault(message, {})[signal] = []
+        return Ok(None)
+
+    def export_plots_to_csv(self) -> list[str]:
+        """
+        Exports all plots to CSV files
+
+        Returns
+        -------
+        str
+            Path to the created CSV file
+        """
+        csv_paths = []
+        for message, signals in self._plots.items():
+            for signal, values in signals.items():
+                csv_name = f"{message}.{signal}.csv"
+                csv_paths.append(csv_name)
+                with open(csv_name, "w") as f:
+                    f.write(f"{message}.{signal}\n")
+                    f.write("\n".join((str(v) for v in values)))
+                    f.write("\n")
+        return csv_paths
+
+    def __del__(self) -> None:
+        """
+        Saves the plots as CSV on garbage collection
+        """
+        created_csv = self.export_plots_to_csv()
+        print(f"CSV files created: {created_csv}")
 
     def filter_message_id(self, can_id: int) -> bool:
         """
@@ -76,6 +140,25 @@ class MessageTable:
         match message:
             case Ok(decoded):
                 self._name_to_message[decoded.message_name] = decoded
+                self._update_plots(decoded)
+
+    def _update_plots(self, message: DecodedMessage) -> Result[None, InvalidType]:
+        """
+        Updates all plots that are currently current for the passed
+        decoded message.
+        """
+        message_plot_dict = self._plots.get(message.message_name)
+        if message_plot_dict is None:
+            return Ok(None)
+
+        for signal, buffer in message_plot_dict.items():
+            received = message.data[signal]
+            try:
+                new_value = float(message.data[signal])
+            except ValueError:
+                return Err(InvalidType(received))
+            buffer.append(new_value)
+        return Ok(None)
 
     def _format_binary_data(self, data: bytes | bytearray) -> str:
         """
