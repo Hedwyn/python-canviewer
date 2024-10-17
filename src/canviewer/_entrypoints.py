@@ -10,19 +10,20 @@ automatically as package scripts.
 from __future__ import annotations
 
 # built-in
-from re import M
-from typing import Iterator, Iterable
+from typing import Iterator, Iterable, IO
 import can
 import asyncio
 import os
+import sys
 import cantools
+from dataclasses import dataclass
 
 # 3rd-party
 import click
 from rich.live import Live
-from rich.console import Console
+from rich.console import Console, Group
 from cantools.database.can import Database
-from exhausterr.results import Ok, Err
+from exhausterr import Ok, Err
 
 # Local
 from ._monitor import (
@@ -31,6 +32,38 @@ from ._monitor import (
     get_platform_default_driver,
 )
 from ._console import MessageTable
+
+# Number of lines for the actual table
+HEIGHT_MARGIN: int = 10
+WIDTH_MARGIN: int = 10
+
+
+@dataclass
+class UserInterface:
+    """
+    Manages the interaction with the user
+    """
+
+    page_index: int = 0
+    total_pages: int = 1
+
+    def on_input(self, stream: IO[str]) -> None:
+        """
+        Process user input from the given stream
+        """
+        command = stream.readline().strip()
+        match command:
+            case "":
+                self.page_index = (self.page_index + 1) % self.total_pages
+
+            case "b":
+                self.page_index = (self.page_index - 1) % self.total_pages
+
+    def page_indication(self) -> str:
+        return (
+            f"Page {self.page_index + 1}/{self.total_pages}"
+            " (Press enter go to next page)"
+        )
 
 
 async def _canviewer(
@@ -60,18 +93,27 @@ async def _canviewer(
         ignore_unknown_messages=ignore_unknown_messages, filters=message_filters
     )
     console = Console()
+    loop = asyncio.get_event_loop()
 
     for message_signal in record_signals:
         if not message_table.start_plot(message_signal):
             click.echo(f"Invalid message signal: {message_signal}")
             return
     with can.Bus(interface=driver, channel=channel) as bus:
-        with Live(console=console) as live:
+        with Live(console=console, screen=True) as live:
+            interface = UserInterface()
+            loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
             backend = CanMonitor(bus, *databases)
-            while True:  # Ctrl + C to leave
-                try:
+            try:
+                while True:  # Ctrl + C to leave
                     message = await backend.queue.get()
                     message_table.update(message)
+
+                    page_height = console.size.height - HEIGHT_MARGIN
+                    page_width = console.size.width - WIDTH_MARGIN
+                    interface.total_pages = message_table.set_page_dimensions(
+                        page_width, page_height
+                    )
                     if single_message is not None:
                         renderable_table = message_table.export_single_message(
                             single_message
@@ -79,13 +121,23 @@ async def _canviewer(
                         if renderable_table is None:
                             continue
                     else:
-                        renderable_table = message_table.export()
-                    live.update(renderable_table)
-                except KeyboardInterrupt:
-                    break
+                        renderable_table = message_table.export_paginated(
+                            interface.page_index
+                        )
 
-    csv_paths = message_table.export_plots_to_csv()
-    click.echo(f"CSV files created: {csv_paths}")
+                    if interface.total_pages > 1 and single_message is None:
+                        renderable = Group(
+                            interface.page_indication(), renderable_table
+                        )
+                    else:
+                        renderable = renderable_table
+
+                    live.update(renderable)
+
+            finally:
+                csv_paths = message_table.export_plots_to_csv()
+                if csv_paths:
+                    click.echo(f"CSV files created: {csv_paths}")
 
 
 def collect_databases(*paths: str) -> Iterator[str]:

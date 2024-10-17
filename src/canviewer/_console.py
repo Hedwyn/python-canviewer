@@ -6,19 +6,19 @@ Tracks the message data and exports it as a renderable table.
 """
 
 from __future__ import annotations
-from typing import Iterable, ClassVar, Any
+from typing import Final, Iterable, ClassVar, Any
 from dataclasses import dataclass
+from math import ceil
 
 # 3rd-party
 from rich.table import Table
 from rich.pretty import Pretty
 from rich.box import DOUBLE
-from exhausterr.results import Result, Ok, Err
-from exhausterr.errors import Error
+from exhausterr import Result, Ok, Err, Error
 
 
 # Local
-from ._monitor import UnknownMessage, DecodedMessage
+from ._monitor import UnknownMessage, DecodedMessage, CanMessage
 
 
 @dataclass
@@ -31,6 +31,10 @@ class InvalidName(Error):
 class InvalidType(Error):
     exception_cls: ClassVar[type[Exception]] = ValueError
     value: Any
+
+
+DEFAULT_WIDTH: Final[int] = 200
+DEFAULT_HEIGHT: Final[int] = 40
 
 
 class MessageTable:
@@ -52,11 +56,43 @@ class MessageTable:
             If enabled, does not include unknown messages in the exported table.
         """
         self._ignore_unknown_messages = ignore_unknown_messages
-        self._id_to_message: dict[int, Result[DecodedMessage, UnknownMessage]] = {}
-        self._name_to_message: dict[str, DecodedMessage] = {}
+        self._decoded_messages: dict[str, DecodedMessage] = {}
+        self._raw_messages: dict[int, CanMessage] = {}
         self._id_filters = set((f for f in filters if isinstance(f, int)))
         self._name_filters = set((f for f in filters if isinstance(f, str)))
         self._plots: dict[str, dict[str, list[float]]] = {}
+        self._page_height: int = DEFAULT_WIDTH
+        self._page_width: int = DEFAULT_WIDTH
+
+    def set_page_dimensions(self, width: int | None, height: int | None) -> int:
+        """
+        Returns
+        -------
+        int
+            Number of pages required to render the entire data
+        """
+        self._page_height = height or self._page_height
+        self._page_width = width or self._page_width
+        return ceil(self.renderable_size() / self._page_height)
+
+    def renderable_size(self) -> int:
+        """
+        Returns
+        -------
+        int
+            Number of lines required to render the entire table
+        """
+        length = 0
+        for decoded in self._decoded_messages.values():
+            if self.filter_message_id(decoded.can_id) or self.filter_message_name(
+                decoded.message_name
+            ):
+                continue
+            length += len(decoded.data) + 2  # Need extra lines for brackets
+
+        if not self._ignore_unknown_messages:
+            length += len(self._raw_messages)
+        return length
 
     def start_plot(self, message_signal_key: str) -> Result[None, InvalidName]:
         """
@@ -65,7 +101,7 @@ class MessageTable:
         ----------
         message_signal_key: str
             Given as `message_name.signal_name`
-        
+
         Returns
         -------
         Result[None, InvalidName]
@@ -99,48 +135,42 @@ class MessageTable:
                     f.write("\n")
         return csv_paths
 
-    def __del__(self) -> None:
-        """
-        Saves the plots as CSV on garbage collection
-        """
-        created_csv = self.export_plots_to_csv()
-        print(f"CSV files created: {created_csv}")
-
     def filter_message_id(self, can_id: int) -> bool:
         """
         Returns
         -------
         bool
-            Whether the message should be filtered in or out
+            Whether the message should be filtered out
         """
         if not self._id_filters:
-            return True
+            return False
 
-        return can_id in self._id_filters
+        return can_id not in self._id_filters
 
     def filter_message_name(self, name: str) -> bool:
         """
         Returns
         -------
         bool
-            Whether the message should be filtered in or out
+            Whether the message should be filtered out
         """
         if not self._name_filters:
-            return True
+            return False
 
-        return name in self._name_filters
+        return name not in self._name_filters
 
     def update(self, message: Result[DecodedMessage, UnknownMessage]) -> None:
         """
         Updates the internal table based on the given result.
         """
-        can_id = message.error.can_id if message.error else message.value.can_id
         # overriding the last version or creating a new one if first encounter
-        self._id_to_message[can_id] = message
         match message:
             case Ok(decoded):
-                self._name_to_message[decoded.message_name] = decoded
+                self._decoded_messages[decoded.message_name] = decoded
                 self._update_plots(decoded)
+
+            case Err(UnknownMessage(can_id, raw_msg)):
+                self._raw_messages[can_id] = raw_msg
 
     def _update_plots(self, message: DecodedMessage) -> Result[None, InvalidType]:
         """
@@ -172,7 +202,8 @@ class MessageTable:
         """
         return Table(
             title="Messages",
-            width=180,
+            min_width=self._page_width,
+            width=self._page_width,
             expand=True,
             box=DOUBLE,
             header_style="bold cyan",
@@ -180,20 +211,19 @@ class MessageTable:
         )
 
     def export_single_message(self, message_id: int | str) -> Table | None:
+        decoded: DecodedMessage | None = None
         if isinstance(message_id, int):
-            last_received = self._id_to_message.get(message_id)
-            if last_received is None:
+            for decoded_msg in self._decoded_messages.values():
+                if decoded_msg.can_id == message_id:
+                    decoded = decoded_msg
+                    break
+            else:
                 return None
-            match last_received:
-                case Ok(d):
-                    decoded = d
-                case Err(_):
-                    return None
         else:
-            decoded = self._name_to_message.get(message_id)
-            if decoded is None:
-                return None
+            decoded = self._decoded_messages.get(message_id)
 
+        if decoded is None:
+            return None
         table = self._table_builder()
         table.add_column("ID", justify="right", style="cyan")
         table.add_column("Name", style="yellow")
@@ -211,40 +241,58 @@ class MessageTable:
 
         return table
 
-    def export(self) -> Table:
+    def export_paginated(self, page_index: int = 0) -> Table:
         """
         Returns
         -------
         Table
             The current tracked data as a renderable table.
         """
+        page_starts = self._page_height * page_index
+        page_ends = page_starts + self._page_height
+        current_index = 0
         table = self._table_builder()
         table.add_column("ID", justify="right", style="cyan")
         table.add_column("Name", style="yellow")
         table.add_column("Binary", style="green")
         table.add_column("Decoded", style="blue")
 
-        for can_id, result in self._id_to_message.items():
-            if not self.filter_message_id(can_id):
+        for decoded in self._decoded_messages.values():
+            if current_index > page_ends:
+                return table
+            if any(
+                (
+                    self.filter_message_id(decoded.can_id),
+                    self.filter_message_name(decoded.message_name),
+                )
+            ):
                 continue
-            match result:
-                case Ok(decoded):
-                    if not self.filter_message_name(decoded.message_name):
-                        continue
-                    table.add_row(
-                        f"{can_id:08X}",
-                        str(decoded.message_name),
-                        self._format_binary_data(decoded.binary),
-                        Pretty(decoded.data),
-                    )
-                case Err(UnknownMessage(can_id, msg)):
-                    if self._ignore_unknown_messages:
-                        continue
-                    table.add_row(
-                        f"{can_id:08X}",
-                        "[Unknown]",
-                        self._format_binary_data(msg.data),
-                        "",
-                    )
+            current_index += len(decoded.data) + 2
+            if current_index < page_starts:
+                continue
+            table.add_row(
+                f"{decoded.can_id:08X}",
+                str(decoded.message_name),
+                self._format_binary_data(decoded.binary),
+                Pretty(decoded.data),
+            )
 
+        if self._ignore_unknown_messages:
+            return table
+
+        for raw_msg in self._raw_messages.values():
+            if current_index > page_ends:
+                return table
+            if not all((self.filter_message_id(raw_msg.arbitration_id),)):
+                continue
+
+            current_index += 1
+            if current_index < page_starts:
+                continue
+            table.add_row(
+                f"{raw_msg.arbitration_id:08X}",
+                "[Unknown]",
+                self._format_binary_data(raw_msg.data),
+                "",
+            )
         return table

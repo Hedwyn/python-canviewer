@@ -10,13 +10,18 @@ Queues the result to make them available to the frontend.
 from __future__ import annotations
 import asyncio
 from asyncio import Queue
-from typing import Union, ClassVar, cast
+from typing import Iterator, Union, ClassVar, cast
 import platform
 from dataclasses import dataclass
-from exhausterr.results import Result, Ok, Err
-from exhausterr.errors import Error
+from exhausterr import Result, Ok, Err, Error
 from can import Message as CanMessage, BusABC
 from cantools.database.can import Database as CanDatabase  # type: ignore[attr-defined]
+from cantools.database.can.message import Message as CanFrame
+from cantools.database.namedsignalvalue import NamedSignalValue
+
+# type hinting
+CanTypes = Union[int, float, str, NamedSignalValue]
+MessageDict = dict[str, CanTypes]
 
 
 @dataclass
@@ -34,6 +39,12 @@ class UnknownMessage(Error):
     can_id: int
     message: CanMessage
 
+    def __hash__(self) -> int:
+        """
+        Uses the CAN Id as the main key
+        """
+        return self.can_id
+
 
 @dataclass
 class UnsupportedSystem(Error):
@@ -48,9 +59,14 @@ class UnsupportedSystem(Error):
     system: str
 
 
-# type hinting
-CanTypes = Union[int, float, str]
-MessageDict = dict[str, CanTypes]
+@dataclass
+class MuxSelectorValue:
+    """
+    A mux selector value
+    """
+
+    name: str
+    value: CanTypes
 
 
 @dataclass
@@ -62,9 +78,30 @@ class DecodedMessage:
     """
 
     can_id: int
-    message_name: str
+    timestamp: float
+    frame_name: str
     binary: bytearray
     data: MessageDict
+    mux_selectors: tuple[MuxSelectorValue, ...] = ()
+
+    def __hash__(self) -> int:
+        """
+        Uses the message as the main key
+        """
+        return hash(self.message_name)
+
+    @property
+    def message_name(self) -> str:
+        """
+        Returns
+        -------
+        str
+            The name of the message, combining the frame name and the mux values.
+        """
+        formatted_selectors = (
+            f"[{mux.name}={mux.value}]" for mux in self.mux_selectors
+        )
+        return self.frame_name + "".join(formatted_selectors)
 
 
 def get_platform_default_channel() -> Result[str, UnsupportedSystem]:
@@ -131,6 +168,28 @@ class CanMonitor:
         """
         return self._queue
 
+    def get_mux_selector_values(
+        self, frame: CanFrame, data: MessageDict
+    ) -> Iterator[MuxSelectorValue]:
+        """
+        Returns
+        -------
+        int | None
+            The index of the mux if the frame is a mux, None otherwise.
+        """
+        if frame.signal_tree is None:
+            return
+        for entry in frame.signal_tree:
+            if not isinstance(entry, dict):
+                # non-mux are just normal names, not dict
+                continue
+            for mux_name in entry:
+                selected_value = data.get(mux_name)
+                if selected_value is None:
+                    continue
+
+                yield MuxSelectorValue(mux_name, selected_value)
+
     def decode_message(self, msg: CanMessage) -> Result[DecodedMessage, UnknownMessage]:
         """
         Looks for a matching message in the list of tracked databases.
@@ -142,11 +201,19 @@ class CanMonitor:
             try:
                 frame = db.get_message_by_frame_id(can_id)
                 decoded_data = frame.decode(msg.data)  # type: ignore[assignment]
+                # Have to cast because cantools does not provide necessary overloads
+                # for decode -> when decode_containers is False, returned type is dict
+                decoded_data = cast(MessageDict, decoded_data)
+                # checking if frame is a mux
+
+                selectors = tuple(self.get_mux_selector_values(frame, decoded_data))
                 decoded_msg = DecodedMessage(
                     can_id=can_id,
-                    message_name=frame.name,
+                    timestamp=msg.timestamp,
+                    frame_name=frame.name,
                     binary=msg.data,
                     data=cast(MessageDict, decoded_data),
+                    mux_selectors=selectors,
                 )
 
                 return Ok(decoded_msg)

@@ -26,7 +26,7 @@ dependencies = [
   "click",
   "cantools",
   "python-can",
-  "exhausterr@git+ssh://git@github.com/Hedwyn/exhausterr",
+  "exhausterr~=0.2.0",
 ]
 
 [project.urls]
