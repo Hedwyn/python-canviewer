@@ -279,11 +279,10 @@ class MessageTable:
 
         if self._ignore_unknown_messages:
             return table
-
         for raw_msg in self._raw_messages.values():
             if current_index > page_ends:
                 return table
-            if not all((self.filter_message_id(raw_msg.arbitration_id),)):
+            if self.filter_message_id(raw_msg.arbitration_id):
                 continue
 
             current_index += 1

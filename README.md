@@ -67,6 +67,9 @@ You can only display some selected messages by passing their name or ID to `-f` 
 canviewer -db my_db.kcd -f My_Message_Name
 ``` 
 
+### Pagination
+If the tables cannot fit on your screen, it will be splitted in multiple tables. You can press enter to navigate (enter goes forwards and `b` + enter goes backward).
+
 ## License
 
 `canviewer` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
