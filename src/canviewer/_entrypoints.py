@@ -74,6 +74,7 @@ async def _canviewer(
     message_filters: Iterable[int | str],
     single_message: str | None = None,
     record_signals: list[str] = [],
+    inline: bool = False,
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -100,7 +101,7 @@ async def _canviewer(
             click.echo(f"Invalid message signal: {message_signal}")
             return
     with can.Bus(interface=driver, channel=channel) as bus:
-        with Live(console=console, screen=True) as live:
+        with Live(console=console, screen=not inline) as live:
             interface = UserInterface()
             loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
             backend = CanMonitor(bus, *databases)
@@ -212,6 +213,12 @@ def collect_databases(*paths: str) -> Iterator[str]:
         "You shall pass your target signal as message_name.signal_name"
     ),
 )
+@click.option(
+    "-n",
+    "--inline",
+    is_flag=True,
+    help=("Disables full-screen"),
+)
 def canviewer(
     channel: str | None,
     driver: str | None,
@@ -220,6 +227,7 @@ def canviewer(
     single_message: str | None,
     ignore_unknown_messages: bool,
     record_signals: list[str],
+    inline: bool,
 ) -> None:
     """
     For every CAN ID found on the CAN bus,
@@ -258,5 +266,6 @@ def canviewer(
             converted_filters,
             single_message=single_message,
             record_signals=record_signals,
+            inline=inline,
         )
     )
