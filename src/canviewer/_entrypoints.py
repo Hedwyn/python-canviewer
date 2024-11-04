@@ -10,13 +10,16 @@ automatically as package scripts.
 from __future__ import annotations
 
 # built-in
-from typing import Iterator, Iterable, IO
+from typing import Iterator, Iterable, IO, Callable, Literal
 import can
 import asyncio
 import os
 import sys
+import json
 import cantools
-from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum, auto
+from dataclasses import dataclass, field
 
 # 3rd-party
 import click
@@ -38,6 +41,14 @@ HEIGHT_MARGIN: int = 10
 WIDTH_MARGIN: int = 10
 
 
+class UserCommands(Enum):
+    """
+    All the commands which can be received from the user
+    """
+
+    TAKE_SNAPSHOT = auto()
+
+
 @dataclass
 class UserInterface:
     """
@@ -46,11 +57,15 @@ class UserInterface:
 
     page_index: int = 0
     total_pages: int = 1
+    dispatcher: dict[UserCommands, Callable[[], None]] = field(default_factory=dict)
+    log: str = ""
 
     def on_input(self, stream: IO[str]) -> None:
         """
         Process user input from the given stream
         """
+        # clearing previous log
+        self.log = ""
         command = stream.readline().strip()
         match command:
             case "":
@@ -58,6 +73,14 @@ class UserInterface:
 
             case "b":
                 self.page_index = (self.page_index - 1) % self.total_pages
+
+            case "s":
+                if (cmd := self.dispatcher.get(UserCommands.TAKE_SNAPSHOT)) is not None:
+                    match cmd():
+                        case Ok(_):
+                            self.log = "Took snapshot successfully !"
+                        case Err(err):
+                            self.log = str(err)
 
     def page_indication(self) -> str:
         return (
@@ -75,6 +98,7 @@ async def _canviewer(
     single_message: str | None = None,
     record_signals: list[str] = [],
     inline: bool = False,
+    snapshot_type: Literal["csv", "json"] = "csv",
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -96,6 +120,23 @@ async def _canviewer(
     console = Console()
     loop = asyncio.get_event_loop()
 
+    def on_snapshot():
+        dict_data = message_table.take_snapshot()
+        base_name = "snapshot_canviewer_" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        # converting to CSV
+        match snapshot_type:
+            case "json":
+                with open(f"{base_name}.json", "w+") as f:
+                    f.write(json.dumps(dict_data, default=str, indent=4))
+
+            case "csv":
+                with open(f"{base_name}.csv", "w+") as f:
+                    header = ",".join(dict_data.keys())
+                    f.write(header + "\n")
+                    values = ",".join([str(v) for v in dict_data.values()])
+                    f.write(values + "\n")
+        return Ok()
+
     for message_signal in record_signals:
         if not message_table.start_plot(message_signal):
             click.echo(f"Invalid message signal: {message_signal}")
@@ -103,6 +144,9 @@ async def _canviewer(
     with can.Bus(interface=driver, channel=channel) as bus:
         with Live(console=console, screen=not inline) as live:
             interface = UserInterface()
+
+            # registering commands
+            interface.dispatcher[UserCommands.TAKE_SNAPSHOT] = on_snapshot
             loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
             backend = CanMonitor(bus, *databases)
             try:
@@ -128,7 +172,7 @@ async def _canviewer(
 
                     if interface.total_pages > 1 and single_message is None:
                         renderable = Group(
-                            interface.page_indication(), renderable_table
+                            interface.page_indication(), interface.log, renderable_table
                         )
                     else:
                         renderable = renderable_table
@@ -219,6 +263,13 @@ def collect_databases(*paths: str) -> Iterator[str]:
     is_flag=True,
     help=("Disables full-screen"),
 )
+@click.option(
+    "-sf",
+    "--snapshot-format",
+    type=click.Choice(["json", "csv"]),
+    default="csv",
+    help=("Format to use for snapshots"),
+)
 def canviewer(
     channel: str | None,
     driver: str | None,
@@ -228,6 +279,7 @@ def canviewer(
     ignore_unknown_messages: bool,
     record_signals: list[str],
     inline: bool,
+    snapshot_format: Literal["json", "csv"],
 ) -> None:
     """
     For every CAN ID found on the CAN bus,
@@ -267,5 +319,6 @@ def canviewer(
             single_message=single_message,
             record_signals=record_signals,
             inline=inline,
+            snapshot_type=snapshot_format,
         )
     )

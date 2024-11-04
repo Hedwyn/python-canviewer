@@ -115,6 +115,17 @@ class MessageTable:
         self._plots.setdefault(message, {})[signal] = []
         return Ok(None)
 
+    def take_snapshot(self) -> dict[str, Any]:
+        """
+        Exports the current data as a CSV snapshot
+        """
+        snapshot = {}
+        for msg_name, decoded in self._decoded_messages.items():
+            for signal_name, value in decoded.data.items():
+                snapshot[f"{msg_name}.{signal_name}"] = value
+
+        return snapshot
+
     def export_plots_to_csv(self) -> list[str]:
         """
         Exports all plots to CSV files
