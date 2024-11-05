@@ -6,7 +6,7 @@ Tracks the message data and exports it as a renderable table.
 """
 
 from __future__ import annotations
-from typing import Final, Iterable, ClassVar, Any
+from typing import Final, Iterable, ClassVar, Any, NamedTuple
 from dataclasses import dataclass
 from math import ceil
 
@@ -19,6 +19,15 @@ from exhausterr import Result, Ok, Err, Error
 
 # Local
 from ._monitor import UnknownMessage, DecodedMessage, CanMessage
+
+
+class CsvRecord(NamedTuple):
+    """
+    Structure for CSV records in plots
+    """
+
+    timestamp: float
+    value: Any
 
 
 @dataclass
@@ -60,7 +69,7 @@ class MessageTable:
         self._raw_messages: dict[int, CanMessage] = {}
         self._id_filters = set((f for f in filters if isinstance(f, int)))
         self._name_filters = set((f for f in filters if isinstance(f, str)))
-        self._plots: dict[str, dict[str, list[float]]] = {}
+        self._plots: dict[str, dict[str, list[CsvRecord]]] = {}
         self._page_height: int = DEFAULT_WIDTH
         self._page_width: int = DEFAULT_WIDTH
 
@@ -141,9 +150,10 @@ class MessageTable:
                 csv_name = f"{message}.{signal}.csv"
                 csv_paths.append(csv_name)
                 with open(csv_name, "w") as f:
-                    f.write(f"{message}.{signal}\n")
-                    f.write("\n".join((str(v) for v in values)))
-                    f.write("\n")
+                    f.write(f"timestamp,{message}.{signal}\n")
+                    for record in values:
+                        f.write(",".join([str(v) for v in record]))
+                        f.write("\n")
         return csv_paths
 
     def filter_message_id(self, can_id: int) -> bool:
@@ -198,7 +208,7 @@ class MessageTable:
                 new_value = float(message.data[signal])
             except ValueError:
                 return Err(InvalidType(received))
-            buffer.append(new_value)
+            buffer.append(CsvRecord(message.timestamp, new_value))
         return Ok(None)
 
     def _format_binary_data(self, data: bytes | bytearray) -> str:
