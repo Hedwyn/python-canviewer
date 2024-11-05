@@ -19,6 +19,8 @@ from cantools.database.can import Database as CanDatabase  # type: ignore[attr-d
 from cantools.database.can.message import Message as CanFrame
 from cantools.database.namedsignalvalue import NamedSignalValue
 
+from ._utils import CanIdPattern
+
 # type hinting
 CanTypes = Union[int, float, str, NamedSignalValue]
 MessageDict = dict[str, CanTypes]
@@ -150,6 +152,8 @@ class CanMonitor:
         bus: BusABC,
         *can_dbs: CanDatabase,
         loop: asyncio.AbstractEventLoop | None = None,
+        mask: int = 0xFFFF_FFFF,
+        id_pattern: CanIdPattern | int | None = None,
     ) -> None:
         self._loop = loop or asyncio.get_event_loop()
         self._queue: Queue[Result[DecodedMessage, UnknownMessage]] = Queue()
@@ -157,6 +161,15 @@ class CanMonitor:
         self._bus = bus
         # Starting the monitor
         self._loop.add_reader(self._bus, self.handler)
+        self._mask = mask
+        if id_pattern is not None:
+            self._id_pattern = (
+                id_pattern
+                if isinstance(id_pattern, CanIdPattern)
+                else CanIdPattern(id_pattern, ~mask)
+            )
+        else:
+            self._id_pattern = None
 
     @property
     def queue(self) -> Queue:
@@ -228,6 +241,15 @@ class CanMonitor:
         Attempts decoding the received data and queues the result.
         """
         next_message = self._bus.recv(timeout=0.0)
+
         if next_message is None:
             return
+
+        can_id = next_message.arbitration_id
+        can_id &= self._mask
+        if self._id_pattern is not None:
+            if not (self._id_pattern.match(can_id)):
+                return
+
+        next_message.arbitration_id = can_id
         self._queue.put_nowait(self.decode_message(next_message))

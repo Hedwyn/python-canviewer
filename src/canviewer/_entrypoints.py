@@ -35,6 +35,7 @@ from ._monitor import (
     get_platform_default_channel,
     get_platform_default_driver,
 )
+from ._utils import convert_pattern_to_mask, InvalidPattern, CanIdPattern
 from ._console import MessageTable
 
 # Number of lines for the actual table
@@ -100,6 +101,8 @@ async def _canviewer(
     record_signals: list[str] = [],
     inline: bool = False,
     snapshot_type: Literal["csv", "json"] = "csv",
+    mask: int = 0xFFFF_FFFF,
+    id_pattern: CanIdPattern | int | None = None,
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -124,9 +127,14 @@ async def _canviewer(
 
     def on_snapshot():
         dict_data = message_table.take_snapshot()
-        fname = "snapshot_canviewer_" + started.strftime("%Y_%m_%d_%H_%M_%S") + "." + snapshot_type
+        fname = (
+            "snapshot_canviewer_"
+            + started.strftime("%Y_%m_%d_%H_%M_%S")
+            + "."
+            + snapshot_type
+        )
         now = time.time()
-        if not os.path.exists(fname) and snapshot_type ==  "csv":
+        if not os.path.exists(fname) and snapshot_type == "csv":
             with open(fname, "w+") as f:
                 header = ",".join(("timestamp", *dict_data.keys()))
                 f.write(header + "\n")
@@ -153,7 +161,7 @@ async def _canviewer(
             # registering commands
             interface.dispatcher[UserCommands.TAKE_SNAPSHOT] = on_snapshot
             loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
-            backend = CanMonitor(bus, *databases)
+            backend = CanMonitor(bus, *databases, mask=mask, id_pattern=id_pattern)
             try:
                 while True:  # Ctrl + C to leave
                     message = await backend.queue.get()
@@ -266,14 +274,28 @@ def collect_databases(*paths: str) -> Iterator[str]:
     "-n",
     "--inline",
     is_flag=True,
-    help=("Disables full-screen"),
+    help="Disables full-screen",
 )
 @click.option(
     "-sf",
     "--snapshot-format",
     type=click.Choice(["json", "csv"]),
     default="csv",
-    help=("Format to use for snapshots"),
+    help="Format to use for snapshots",
+)
+@click.option(
+    "-mk",
+    "--mask",
+    type=str,
+    default="FFFFFFFF",
+    help="Applies this mask on CAN IDs before feeding to decoder",
+)
+@click.option(
+    "-p",
+    "--pattern",
+    type=str,
+    default=None,
+    help="Filter in all the messages following that pattern",
 )
 def canviewer(
     channel: str | None,
@@ -285,6 +307,8 @@ def canviewer(
     record_signals: list[str],
     inline: bool,
     snapshot_format: Literal["json", "csv"],
+    mask: str,
+    pattern: str | None,
 ) -> None:
     """
     For every CAN ID found on the CAN bus,
@@ -292,6 +316,12 @@ def canviewer(
     If the message is declared in one of the passed databases,
     shows the decoded data.
     """
+
+    try:
+        id_pattern = convert_pattern_to_mask(pattern) if pattern else None
+    except InvalidPattern as exc:
+        raise click.BadParameter(str(exc), param_hint="pattern") from exc
+
     if channel is None:
         match get_platform_default_channel():
             case Ok(channel_name):
@@ -325,5 +355,7 @@ def canviewer(
             record_signals=record_signals,
             inline=inline,
             snapshot_type=snapshot_format,
+            id_pattern=id_pattern,
+            mask=int(mask, 16),
         )
     )
