@@ -104,10 +104,10 @@ def convert_pattern_to_mask(pattern: str) -> CanIdPattern | int:
         pattern = pattern[:-1]
         pattern_value = _convert_from_hex(pattern)
         # We pad based on 32 bits masks, hence 8 hex digits
-        mask_shift = len(pattern) * 4  # each digit is 4 bits
-        value_shift = 32 - mask_shift
+        bitsize = len(pattern) * 4  # each digit is 4 bits
+        value_shift = 32 - bitsize
         pattern_value <<= value_shift
-        mask = (2**mask_shift - 1) << mask_shift
+        mask = (2**bitsize - 1) << value_shift
         return CanIdPattern(pattern_value, mask)
 
     return _convert_from_hex(pattern)
