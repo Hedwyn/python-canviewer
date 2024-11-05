@@ -209,7 +209,7 @@ class CanMonitor:
         Decodes the message if possible otherwise returns a `UnknownMessage`
         with the received message data
         """
-        can_id = msg.arbitration_id
+        can_id = msg.arbitration_id & self._mask
         for db in self._dbs:
             try:
                 frame = db.get_message_by_frame_id(can_id)
@@ -246,10 +246,8 @@ class CanMonitor:
             return
 
         can_id = next_message.arbitration_id
-        can_id &= self._mask
         if self._id_pattern is not None:
             if not (self._id_pattern.match(can_id)):
                 return
 
-        next_message.arbitration_id = can_id
         self._queue.put_nowait(self.decode_message(next_message))

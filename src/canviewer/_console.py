@@ -40,7 +40,7 @@ DEFAULT_HEIGHT: Final[int] = 40
 class MessageTable:
     """
     Stateful object; tracks the latest version of each message received
-    and provides a primtive to export the current state as single renderable table.
+    and provides a primitive to export the current state as single renderable table.
     Messages are sorted by IDs.
     """
 
