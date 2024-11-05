@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # built-in
 from typing import Iterator, Iterable, IO, Callable, Literal
+import time
 import can
 import asyncio
 import os
@@ -119,21 +120,25 @@ async def _canviewer(
     )
     console = Console()
     loop = asyncio.get_event_loop()
+    started = datetime.now()
 
     def on_snapshot():
         dict_data = message_table.take_snapshot()
-        base_name = "snapshot_canviewer_" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        fname = "snapshot_canviewer_" + started.strftime("%Y_%m_%d_%H_%M_%S") + "." + snapshot_type
+        now = time.time()
+        if not os.path.exists(fname) and snapshot_type ==  "csv":
+            with open(fname, "w+") as f:
+                header = ",".join(("timestamp", *dict_data.keys()))
+                f.write(header + "\n")
         # converting to CSV
-        match snapshot_type:
-            case "json":
-                with open(f"{base_name}.json", "w+") as f:
+        with open(fname, "a+") as f:
+            match snapshot_type:
+                case "json":
+                    dict_data["timestamp"] = now
                     f.write(json.dumps(dict_data, default=str, indent=4))
 
-            case "csv":
-                with open(f"{base_name}.csv", "w+") as f:
-                    header = ",".join(dict_data.keys())
-                    f.write(header + "\n")
-                    values = ",".join([str(v) for v in dict_data.values()])
+                case "csv":
+                    values = ",".join((str(now), *[str(v) for v in dict_data.values()]))
                     f.write(values + "\n")
         return Ok()
 
