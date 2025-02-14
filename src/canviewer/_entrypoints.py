@@ -84,6 +84,17 @@ class UserInterface:
                         case Err(err):
                             self.log = str(err)
 
+            case _:
+                if command.isnumeric():
+                    try:
+                        idx = int(command) - 1
+                    except ValueError:
+                        # ignoreing
+                        return
+
+                    if 0 <= idx < self.total_pages:
+                        self.page_index = idx
+
     def page_indication(self) -> str:
         return (
             f"Page {self.page_index + 1}/{self.total_pages}"
