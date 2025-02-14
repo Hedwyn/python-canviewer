@@ -291,11 +291,18 @@ class MessageTable:
             current_index += len(decoded.data) + 2
             if current_index < page_starts:
                 continue
+
+            # Pre-formatting floating numbers to prevent GUI wiggling
+            # due to tiny floating-point precision inconsistencies thingies
+            preformatted_data = {
+                key: f"{val:.2f}" if isinstance(val, float) else str(val)
+                for key, val in decoded.data.items()
+            }
             table.add_row(
                 f"{decoded.can_id:08X}",
                 str(decoded.message_name),
                 self._format_binary_data(decoded.binary),
-                Pretty(decoded.data),
+                Pretty(preformatted_data),
             )
 
         if self._ignore_unknown_messages:
