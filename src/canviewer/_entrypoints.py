@@ -238,7 +238,7 @@ async def _canviewer(
                             renderable_table,
                         )
                     else:
-                        renderable = renderable_table
+                        renderable = Group(*plots, renderable_table)
 
                     live.update(renderable)
 
