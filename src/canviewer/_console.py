@@ -65,7 +65,8 @@ class MessageTable:
             If enabled, does not include unknown messages in the exported table.
         """
         self._ignore_unknown_messages = ignore_unknown_messages
-        self._decoded_messages: dict[str, DecodedMessage] = {}
+        # CAN ID is used as primary key
+        self._decoded_messages: dict[int, DecodedMessage] = {}
         self._raw_messages: dict[int, CanMessage] = {}
         self._id_filters = set((f for f in filters if isinstance(f, int)))
         self._name_filters = set((f for f in filters if isinstance(f, str)))
@@ -187,7 +188,7 @@ class MessageTable:
         # overriding the last version or creating a new one if first encounter
         match message:
             case Ok(decoded):
-                self._decoded_messages[decoded.message_name] = decoded
+                self._decoded_messages[decoded.can_id] = decoded
                 self._update_plots(decoded)
 
             case Err(UnknownMessage(can_id, raw_msg)):
@@ -233,9 +234,9 @@ class MessageTable:
 
     def export_single_message(self, message_id: int | str) -> Table | None:
         decoded: DecodedMessage | None = None
-        if isinstance(message_id, int):
+        if isinstance(message_id, str):
             for decoded_msg in self._decoded_messages.values():
-                if decoded_msg.can_id == message_id:
+                if decoded_msg.message_name == message_id:
                     decoded = decoded_msg
                     break
             else:
