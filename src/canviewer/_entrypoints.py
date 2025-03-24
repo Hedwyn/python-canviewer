@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 # 3rd-party
 import click
+from rich.prompt import Prompt
 from rich.live import Live
 from rich.console import Console, Group
 from cantools.database.can import Database
@@ -87,7 +88,7 @@ class UserInterface:
                         case Err(err):
                             self.log = str(err)
 
-            # zoom in / zoom out commands
+            # zoom in / zoom out commandsp
             case "+" | "++" | "+++":
                 zoom_factor = ZOOM_FACTOR ** len(command)
                 self.height = round(self.height / zoom_factor)
@@ -106,6 +107,8 @@ class UserInterface:
 
                     if 0 <= idx < self.total_pages:
                         self.page_index = idx
+                else:
+                    self.log = f"[red]Unknown command: {command}"
 
     def page_indication(self) -> str:
         return (
