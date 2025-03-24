@@ -41,6 +41,8 @@ from ._console import MessageTable
 # Number of lines for the actual table
 HEIGHT_MARGIN: int = 10
 WIDTH_MARGIN: int = 10
+DEFAULT_HEIGHT = 30
+ZOOM_FACTOR = 1.1
 
 
 class UserCommands(Enum):
@@ -61,6 +63,7 @@ class UserInterface:
     total_pages: int = 1
     dispatcher: dict[UserCommands, Callable[[], None]] = field(default_factory=dict)
     log: str = ""
+    height: int = DEFAULT_HEIGHT
 
     def on_input(self, stream: IO[str]) -> None:
         """
@@ -84,12 +87,21 @@ class UserInterface:
                         case Err(err):
                             self.log = str(err)
 
+            # zoom in / zoom out commands
+            case "+" | "++" | "+++":
+                zoom_factor = ZOOM_FACTOR ** len(command)
+                self.height = round(self.height / zoom_factor)
+
+            case "-" | "--" | "---":
+                zoom_factor = ZOOM_FACTOR ** len(command)
+                self.height = round(self.height * zoom_factor)
+
             case _:
                 if command.isnumeric():
                     try:
                         idx = int(command) - 1
                     except ValueError:
-                        # ignoreing
+                        # ignoring
                         return
 
                     if 0 <= idx < self.total_pages:
@@ -136,7 +148,7 @@ async def _canviewer(
     loop = asyncio.get_event_loop()
     started = datetime.now()
 
-    def on_snapshot():
+    def on_snapshot() -> Ok[None]:
         dict_data = message_table.take_snapshot()
         fname = (
             "snapshot_canviewer_"
@@ -165,9 +177,10 @@ async def _canviewer(
         if not message_table.start_plot(message_signal):
             click.echo(f"Invalid message signal: {message_signal}")
             return
+
     with can.Bus(interface=driver, channel=channel) as bus:
         with Live(console=console, screen=not inline) as live:
-            interface = UserInterface()
+            interface = UserInterface(height=console.size.height)
 
             # registering commands
             interface.dispatcher[UserCommands.TAKE_SNAPSHOT] = on_snapshot
@@ -178,7 +191,7 @@ async def _canviewer(
                     message = await backend.queue.get()
                     message_table.update(message)
 
-                    page_height = console.size.height - HEIGHT_MARGIN
+                    page_height = interface.height - HEIGHT_MARGIN
                     page_width = console.size.width - WIDTH_MARGIN
                     interface.total_pages = message_table.set_page_dimensions(
                         page_width, page_height
