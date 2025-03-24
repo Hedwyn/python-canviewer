@@ -209,10 +209,12 @@ class CanMonitor:
         Decodes the message if possible otherwise returns a `UnknownMessage`
         with the received message data
         """
-        can_id = msg.arbitration_id & self._mask
+        can_id = msg.arbitration_id
+        # applying mask
+        candidate_id = can_id & self._mask
         for db in self._dbs:
             try:
-                frame = db.get_message_by_frame_id(can_id)
+                frame = db.get_message_by_frame_id(candidate_id)
                 decoded_data = frame.decode(msg.data)  # type: ignore[assignment]
                 # Have to cast because cantools does not provide necessary overloads
                 # for decode -> when decode_containers is False, returned type is dict
@@ -233,7 +235,7 @@ class CanMonitor:
             except KeyError:
                 continue
 
-        return Err(UnknownMessage(can_id, msg))
+        return Err(UnknownMessage(candidate_id, msg))
 
     def handler(self) -> None:
         """
