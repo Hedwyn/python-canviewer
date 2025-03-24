@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
   "rich",
+  "asciichartpy",
   "click",
   "cantools",
   "python-can",

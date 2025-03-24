@@ -136,6 +136,33 @@ class MessageTable:
 
         return snapshot
 
+    def get_plot_by_name(
+        self, message_signal_key: str
+    ) -> Result[tuple[list[int], list[float]], InvalidName]:
+        """
+        Returns
+        -------
+        Result[tuple[list[int], list[float]], InvalidName]
+            If OK, the tuple of x and y values.
+            Else InvalidName if message-signal key is invalid
+        """
+        try:
+            message, signal = message_signal_key.split(".")
+        except ValueError:
+            return Err(InvalidName(message_signal_key))
+
+        try:
+            values = self._plots[message][signal]
+        except KeyError as exc:
+            Err(InvalidName(str(exc)))
+
+        x_vals = []
+        y_vals = []
+        for x, y in values:
+            x_vals.append(x)
+            y_vals.append(y)
+        return Ok((x_vals, y_vals))
+
     def export_plots_to_csv(self) -> list[str]:
         """
         Exports all plots to CSV files

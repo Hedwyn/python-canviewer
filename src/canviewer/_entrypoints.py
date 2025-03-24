@@ -9,26 +9,30 @@ automatically as package scripts.
 
 from __future__ import annotations
 
-# built-in
-from typing import Iterator, Iterable, IO, Callable, Literal
-import time
-import can
 import asyncio
+import json
 import os
 import sys
-import json
-import cantools
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from dataclasses import dataclass, field
+
+# built-in
+from typing import IO, Callable, Iterable, Iterator, Literal
+
+import can
+import cantools
 
 # 3rd-party
 import click
-from rich.prompt import Prompt
-from rich.live import Live
-from rich.console import Console, Group
 from cantools.database.can import Database
-from exhausterr import Ok, Err
+from exhausterr import Err, Ok
+from rich.console import Console, Group
+from rich.live import Live
+import asciichartpy as acp
+
+from ._console import MessageTable
 
 # Local
 from ._monitor import (
@@ -36,14 +40,14 @@ from ._monitor import (
     get_platform_default_channel,
     get_platform_default_driver,
 )
-from ._utils import convert_pattern_to_mask, InvalidPattern, CanIdPattern
-from ._console import MessageTable
+from ._utils import CanIdPattern, InvalidPattern, convert_pattern_to_mask
 
 # Number of lines for the actual table
 HEIGHT_MARGIN: int = 10
 WIDTH_MARGIN: int = 10
 DEFAULT_HEIGHT = 30
 ZOOM_FACTOR = 1.1
+PLOT_MAX_SIZE = 50
 
 
 class UserCommands(Enum):
@@ -84,11 +88,11 @@ class UserInterface:
                 if (cmd := self.dispatcher.get(UserCommands.TAKE_SNAPSHOT)) is not None:
                     match cmd():
                         case Ok(_):
-                            self.log = "Took snapshot successfully !"
+                            self.log = "[green]Took snapshot successfully !"
                         case Err(err):
                             self.log = str(err)
 
-            # zoom in / zoom out commandsp
+            # zoom in / zoom out commands
             case "+" | "++" | "+++":
                 zoom_factor = ZOOM_FACTOR ** len(command)
                 self.height = round(self.height / zoom_factor)
@@ -125,6 +129,7 @@ async def _canviewer(
     message_filters: Iterable[int | str],
     single_message: str | None = None,
     record_signals: list[str] = [],
+    plot_signals: list[str] = [],
     inline: bool = False,
     snapshot_type: Literal["csv", "json"] = "csv",
     mask: int = 0xFFFF_FFFF,
@@ -176,7 +181,7 @@ async def _canviewer(
                     f.write(values + "\n")
         return Ok()
 
-    for message_signal in record_signals:
+    for message_signal in (*record_signals, *plot_signals):
         if not message_table.start_plot(message_signal):
             click.echo(f"Invalid message signal: {message_signal}")
             return
@@ -210,9 +215,27 @@ async def _canviewer(
                             interface.page_index
                         )
 
+                    plots = []
+                    for message_signal in plot_signals:
+                        match message_table.get_plot_by_name(message_signal):
+                            case Ok(data):
+                                _, y = data
+                                plots.append(
+                                    Group(
+                                        message_signal,
+                                        acp.plot(y[:PLOT_MAX_SIZE]),
+                                    )
+                                )
+
+                            case Err(error):
+                                interface.log = f"[red]{error}"
+
                     if interface.total_pages > 1 and single_message is None:
                         renderable = Group(
-                            interface.page_indication(), interface.log, renderable_table
+                            interface.page_indication(),
+                            interface.log,
+                            *plots,
+                            renderable_table,
                         )
                     else:
                         renderable = renderable_table
@@ -294,6 +317,17 @@ def collect_databases(*paths: str) -> Iterator[str]:
     type=str,
     help=(
         "Records the values for a given signal, exports them to CSV on exiting.\n"
+        "If you'd like to also plot the signal in realtime, use -pl/--plot instead\n"
+        "You shall pass your target signal as message_name.signal_name"
+    ),
+)
+@click.option(
+    "-pl",
+    "--plot-signals",
+    multiple=True,
+    type=str,
+    help=(
+        "Plots the values for a given signal, exports them to CSV on exiting.\n"
         "You shall pass your target signal as message_name.signal_name"
     ),
 )
@@ -332,6 +366,7 @@ def canviewer(
     single_message: str | None,
     ignore_unknown_messages: bool,
     record_signals: list[str],
+    plot_signals: list[str],
     inline: bool,
     snapshot_format: Literal["json", "csv"],
     mask: str,
@@ -380,6 +415,7 @@ def canviewer(
             converted_filters,
             single_message=single_message,
             record_signals=record_signals,
+            plot_signals=plot_signals,
             inline=inline,
             snapshot_type=snapshot_format,
             id_pattern=id_pattern,
