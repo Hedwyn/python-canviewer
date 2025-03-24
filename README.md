@@ -9,6 +9,7 @@
 - [Usage](#usage)
   - [Filtering](#filtering)
   - [Pagination](#pagination)
+  - [Plotting signals](#plotting-signals)
   - [Live commands](#live-commands)
     - [Taking snapshots](#taking-snapshots)
     - [Navigating](#navigating)
@@ -73,7 +74,10 @@ You can filter out unknown messages by passsing `-i`.<br>
 You can only display some selected messages by passing their name or ID to `-f` flag (flag can be passed multiple times):
 ```
 canviewer -db my_db.kcd -f My_Message_Name
-``` 
+```
+
+## Plotting signals
+You can ask `canviewer` to plot one or multiple signals in real-time by using the `pl` (`--plot`) flag. It should be apssed as`-pl message_name.signal_name` and you can pass this flag as many times as you want (one plot will be spawned per signal). The signal will also be recorded to csv file. Note that if you'd like to only record without plotting, use `-r` instead.
 
 ## Pagination
 If the tables cannot fit on your screen, it will be splitted in multiple tables. You can press enter to navigate (enter goes forwards and `b` + enter goes backward, see live commands below).
