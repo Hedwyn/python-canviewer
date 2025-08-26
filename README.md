@@ -129,9 +129,7 @@ Path to model:
 /tmp/tmp0zkw00sm
 Use Ctrl + C to leave
  ```
-Simply `cd` to the displayed path and you shoPath to model:
-/tmp/tmp0zkw00sm
-Use Ctrl + C to leaveuld find all the JSON files for the messages in the passed database there. Files should be named following the schema `{message_name}.json`.
+Simply `cd` to the displayed path and you should find all the JSON files for the messages in the passed database there. Files should be named following the schema `{message_name}.json`.
 
 
 
