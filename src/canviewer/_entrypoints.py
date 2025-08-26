@@ -21,18 +21,20 @@ from enum import Enum, auto
 # built-in
 from typing import IO, Callable, Iterable, Iterator, Literal
 
+import asciichartpy as acp
 import can
 import cantools
 
 # 3rd-party
 import click
+import rich
 from cantools.database.can import Database
 from exhausterr import Err, Ok
 from rich.console import Console, Group
 from rich.live import Live
-import asciichartpy as acp
 
 from ._console import MessageTable
+from ._jsonify import JsonModel
 
 # Local
 from ._monitor import (
@@ -422,3 +424,34 @@ def canviewer(
             mask=int(mask, 16),
         )
     )
+
+
+@click.command()
+@click.argument("database", type=str)
+@click.option(
+    "-c",
+    "--channel",
+    default="can0",
+    type=str,
+    help="Name of the CAN channel to monitor",
+)
+def canviewer_jsonify(database: str, channel: str) -> None:
+    """
+    database: Path to the database to JSONify
+    """
+    try:
+        can_db = cantools.database.load_file(database)
+    except FileNotFoundError:
+        rich.print(f"[red]: File does not exist: {database}")
+        return
+
+    assert isinstance(can_db, Database)
+    model = JsonModel(can_db)
+    with can.interface.Bus(interface="socketcan", channel=channel) as bus:
+        with model.open() as tmp:
+            rich.print("Path to model:\n" f"[green]{tmp}")
+            rich.print("Use Ctrl + C to leave")
+            while True:
+                next_message = bus.recv()
+                assert next_message is not None  # value can only be None on timeout
+                model.update_model(next_message)

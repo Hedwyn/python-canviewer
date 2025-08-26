@@ -37,6 +37,7 @@ Source = "https://github.com/Hedwyn/python-canviewer"
 
 [project.scripts]
 canviewer = "canviewer._entrypoints:canviewer"
+canviewer-jsonify="canviewer._entrypoints:canviewer_jsonify"
 
 [tool.hatch.version]
 source = "vcs"
