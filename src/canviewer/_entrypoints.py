@@ -443,6 +443,7 @@ def canviewer(
     type=click.Choice(list(logging._nameToLevel), case_sensitive=False),
     help="Log level to apply",
 )
+# JSON model config options
 @click.option(
     "-a",
     "--accumulate",
@@ -452,8 +453,31 @@ def canviewer(
         "instead of only the last one"
     ),
 )
+@click.option(
+    "-t",
+    "--target-folder",
+    type=str,
+    help=(
+        "If passed, the temp folder for JSON files will be created in this location.\n"
+        "If not, it will be created somewhere in /tmp"
+    ),
+)
+@click.option(
+    "-p",
+    "--preserve-files",
+    is_flag=True,
+    help=(
+        "Whether the temp folder and its JSON files should be deleted on exit.\n"
+        "Disabled by default."
+    ),
+)
 def canviewer_jsonify(
-    database: str, channel: str, log_level: str, accumulate: bool
+    database: str,
+    channel: str,
+    log_level: str,
+    accumulate: bool,
+    target_folder: str,
+    preserve_files: bool,
 ) -> None:
     """
     database: Path to the database to JSONify
@@ -465,7 +489,11 @@ def canviewer_jsonify(
     )
     logging.getLogger("inotify").setLevel(logging.ERROR)
 
-    config = ModelConfig(accumulate=accumulate)
+    config = ModelConfig(
+        accumulate=accumulate,
+        target_folder=target_folder,
+        preserve_files=preserve_files,
+    )
     try:
         can_db = cantools.database.load_file(database)
     except FileNotFoundError:

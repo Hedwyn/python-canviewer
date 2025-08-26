@@ -26,7 +26,6 @@ from can.message import Message
 from cantools.database import Message as CanFrame
 from cantools.database.can import Database as CanDatabase
 from cantools.database.can.signal import Signal as CanSignal
-from cantools.database.conversion import _is_integer
 from cantools.database.namedsignalvalue import NamedSignalValue
 
 type CanBasicTypes = float | int | str
@@ -68,10 +67,19 @@ class ModelConfig:
         instead of overwriting a single dict value (the most recent one)
         Defaults to disabled.
 
+    target_folder: str | None
+        If passed, the temp folder for JSON files will be created in this location.
+        If not, it will be created somewhere in /tmp
+
+    preserve_files: bool
+        Whether the temp folder and its JSON files should be deleted on exit.
+        Disabled by default.
     """
 
     # placeholder for future user parametrization
     accumulate: bool = False
+    target_folder: str | None = None
+    preserve_files: bool = False
 
 
 class JsonModel:
@@ -127,7 +135,9 @@ class JsonModel:
         the JSON files for all messages defined in the database to which this model
         is attached.
         """
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(
+            dir=self._config.target_folder, delete=not self._config.preserve_files
+        ) as tmp:
             self._tmp_folder = tmp
             self.create_json_files(tmp)
             yield tmp
