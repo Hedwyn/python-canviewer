@@ -457,8 +457,8 @@ def canviewer(
     ),
 )
 @click.option(
-    "-t",
-    "--target-folder",
+    "-o",
+    "--output-folder",
     type=str,
     help=(
         "If passed, the temp folder for JSON files will be created in this location.\n"
@@ -474,13 +474,25 @@ def canviewer(
         "Disabled by default."
     ),
 )
+@click.option(
+    "-t",
+    "--timestamps",
+    is_flag=True,
+    help=(
+        """
+        Writes last reception timestamp in the JSON file for message,
+        in a LAST_RECEIVED key.
+        """
+    ),
+)
 def canviewer_jsonify(
     database: str,
     channel: str,
     log_level: str,
     accumulate: bool,
-    target_folder: str,
+    output_folder: str,
     preserve_files: bool,
+    timestamps: bool,
 ) -> None:
     """
     database: Path to the database to JSONify
@@ -494,8 +506,9 @@ def canviewer_jsonify(
 
     config = ModelConfig(
         accumulate=accumulate,
-        target_folder=target_folder,
+        target_folder=output_folder,
         preserve_files=preserve_files,
+        enable_timestamping=timestamps,
     )
     try:
         can_db = cantools.database.load_file(database)

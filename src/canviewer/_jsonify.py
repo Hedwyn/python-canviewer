@@ -17,6 +17,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from threading import Thread
 from typing import Any, Callable, Generator, cast
 
@@ -80,6 +81,7 @@ class ModelConfig:
     accumulate: bool = False
     target_folder: str | None = None
     preserve_files: bool = False
+    enable_timestamping: bool = False
 
 
 class JsonModel:
@@ -170,7 +172,9 @@ class JsonModel:
                 )
 
     def update_message_values(
-        self, message_name: str, message_values: dict[str, CanBasicTypes]
+        self,
+        message_name: str,
+        message_values: dict[str, CanBasicTypes],
     ) -> None:
         """
         Updates the values in the JSON file of `message_name` with the given `values`.
@@ -194,6 +198,7 @@ class JsonModel:
                 "User might have tampered the data manually"
             )
             previous_values.update(message_values)
+
         with open(self.get_message_json_path(message_name), "w+") as f:
             f.write(json.dumps(previous_values, **self.json_dump_options))
 
@@ -214,7 +219,7 @@ class JsonModel:
                 ), "Found empty JSON data; user might have tampered file content manually"
 
                 return json_data[-1]  # type: ignore
-            return json_data
+            return json_data  # type: ignore
 
     def encode_message(self, message_name: str) -> bytes:
         """
@@ -245,6 +250,9 @@ class JsonModel:
             return
 
         values = can_frame.decode(bytes(raw_message.data))
+        if self._config.enable_timestamping:
+            human_ts = datetime.fromtimestamp(raw_message.timestamp)
+            values["LAST_RECEIVED"] = str(human_ts)  # type: ignore
 
         self.update_message_values(
             can_frame.name, cast(dict[str, CanBasicTypes], values)
