@@ -28,6 +28,7 @@ dependencies = [
   "cantools",
   "python-can",
   "exhausterr~=0.2.0",
+  "inotify",
 ]
 
 [project.urls]

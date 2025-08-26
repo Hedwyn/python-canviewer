@@ -16,8 +16,11 @@ import os
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generator, cast
+from threading import Thread
+from typing import Any, Callable, Generator, cast
 
+import inotify.adapters
+from can.bus import BusABC
 from can.message import Message
 from cantools.database import Message as CanFrame
 from cantools.database.can import Database as CanDatabase
@@ -60,6 +63,7 @@ class JsonModel:
         self._config = config or ModelConfig()
         self._tmp_folder: str | None = None
         self._database = database
+        self._inotify_ignore_set: set[str] = set()
 
     @property
     def json_dump_options(self) -> dict[str, Any]:
@@ -130,6 +134,7 @@ class JsonModel:
         """
         Updates the values in the JSON file of `message_name` with the given `values`.
         """
+        self._inotify_ignore_set.add(message_name)
         previous_values = self.get_message_values(message_name)
         previous_values.update(message_values)
         with open(self.get_message_json_path(message_name), "w+") as f:
@@ -177,3 +182,48 @@ class JsonModel:
         self.update_message_values(
             can_frame.name, cast(dict[str, CanBasicTypes], values)
         )
+
+    def _run_inotify_watcher(
+        self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
+    ) -> None:
+        i = inotify.adapters.Inotify()
+
+        i.add_watch(self.tmp_folder)
+
+        for event in i.event_gen(yield_nones=False):
+            assert event is not None, "`yield_nones` is True yet None was yielded"
+            (_, type_names, path, filename) = event
+            message_name = filename.removesuffix(".json")
+            if not filename.endswith(".json"):
+                continue
+            if message_name in self._inotify_ignore_set:
+                continue
+            if "IN_MODIFY" in type_names:
+                # triggering message send
+                values = self.get_message_values(message_name)
+                frame = self._database.get_message_by_name(message_name)
+                try:
+                    bus.send(
+                        Message(
+                            arbitration_id=frame.frame_id, data=frame.encode(values)
+                        )
+                    )
+                except Exception as exc:
+                    if on_error is None:
+                        raise
+                    on_error(message_name, exc)
+
+    def start_inotify_watcher(
+        self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
+    ) -> Thread:
+        """
+        Starts watching for changes in any of the monitored JSON files for messages.
+        Messages that are received on the bus are automatically excluded from watching.
+        Messages that are meant to be sent by this side (thus are not received on the bus)
+        will be sent automatically on the given `bus` when a modification is detected.
+        """
+        watcher = Thread(
+            target=self._run_inotify_watcher, args=(bus, on_error), daemon=True
+        )
+        watcher.start()
+        return watcher

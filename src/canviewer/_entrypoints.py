@@ -445,12 +445,16 @@ def canviewer_jsonify(database: str, channel: str) -> None:
         rich.print(f"[red]: File does not exist: {database}")
         return
 
+    def report_error(message_name: str, exc: Exception) -> None:
+        rich.print(f"[red] Values for message {message_name} are incorrect: {exc}")
+
     assert isinstance(can_db, Database)
     model = JsonModel(can_db)
     with can.interface.Bus(interface="socketcan", channel=channel) as bus:
         with model.open() as tmp:
             rich.print("Path to model:\n" f"[green]{tmp}")
             rich.print("Use Ctrl + C to leave")
+            model.start_inotify_watcher(bus, on_error=report_error)
             while True:
                 next_message = bus.recv()
                 assert next_message is not None  # value can only be None on timeout
