@@ -82,6 +82,7 @@ class ModelConfig:
     target_folder: str | None = None
     preserve_files: bool = False
     enable_timestamping: bool = False
+    force_extended_id: bool | None = None
 
 
 class JsonModel:
@@ -262,9 +263,8 @@ class JsonModel:
         self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
     ) -> None:
         i = inotify.adapters.Inotify()
-
         i.add_watch(self.tmp_folder)
-
+        # do something
         for event in i.event_gen(yield_nones=False):
             assert event is not None, "`yield_nones` is True yet None was yielded"
             (_, type_names, path, filename) = event
@@ -288,9 +288,14 @@ class JsonModel:
                     values,
                 )
                 try:
+                    is_extended_id = self._config.force_extended_id
+                    if is_extended_id is None:
+                        is_extended_id = frame.is_extended_frame
                     bus.send(
                         Message(
-                            arbitration_id=frame.frame_id, data=frame.encode(values)
+                            arbitration_id=frame.frame_id,
+                            data=frame.encode(values),
+                            is_extended_id=is_extended_id,
                         )
                     )
                 except Exception as exc:
