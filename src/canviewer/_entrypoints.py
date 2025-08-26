@@ -28,6 +28,7 @@ import cantools
 
 # 3rd-party
 import click
+import pyperclip
 import rich
 from cantools.database.can import Database
 from exhausterr import Err, Ok
@@ -44,6 +45,8 @@ from ._monitor import (
     get_platform_default_driver,
 )
 from ._utils import CanIdPattern, InvalidPattern, convert_pattern_to_mask
+
+_logger = logging.getLogger(__name__)
 
 # Number of lines for the actual table
 HEIGHT_MARGIN: int = 10
@@ -508,6 +511,13 @@ def canviewer_jsonify(
     with can.interface.Bus(interface="socketcan", channel=channel) as bus:
         with model.open() as tmp:
             rich.print("Path to model:\n" f"[green]{tmp}")
+            try:
+                pyperclip.copy(tmp)
+                rich.print("[green]> Path has been copied to your clipboard ! ")
+            except Exception as exc:
+                _logger.error(
+                    "Failed to copy tmp path to clipboard: %s", exc, exc_info=True
+                )
             rich.print("Use Ctrl + C to leave")
             model.start_inotify_watcher(bus, on_error=report_error)
             while True:

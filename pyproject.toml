@@ -29,6 +29,7 @@ dependencies = [
   "python-can",
   "exhausterr~=0.2.0",
   "inotify",
+  "pyperclip",
 ]
 
 [project.urls]
