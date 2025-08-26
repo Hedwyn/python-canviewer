@@ -26,6 +26,7 @@ from can.message import Message
 from cantools.database import Message as CanFrame
 from cantools.database.can import Database as CanDatabase
 from cantools.database.can.signal import Signal as CanSignal
+from cantools.database.conversion import _is_integer
 from cantools.database.namedsignalvalue import NamedSignalValue
 
 type CanBasicTypes = float | int | str
@@ -59,8 +60,18 @@ def find_sound_default(signal: CanSignal) -> CanBasicTypes:
 
 @dataclass
 class ModelConfig:
+    """
+    Parameters
+    ----------
+    accumulate: bool
+        If enabled, keeps stacking message values as a JSON list
+        instead of overwriting a single dict value (the most recent one)
+        Defaults to disabled.
+
+    """
+
     # placeholder for future user parametrization
-    pass
+    accumulate: bool = False
 
 
 class JsonModel:
@@ -155,8 +166,24 @@ class JsonModel:
         Updates the values in the JSON file of `message_name` with the given `values`.
         """
         self._inotify_ignore_set.add(message_name)
-        previous_values = self.get_message_values(message_name)
-        previous_values.update(message_values)
+        message_json_path = self.get_message_json_path(message_name)
+        # reading previous values
+        with open(message_json_path) as f:
+            previous_values = json.loads(f.read())
+
+        if self._config.accumulate:
+            if isinstance(previous_values, dict):
+                # found the placeholder we created automatically
+                # we can delete it
+                previous_values = []
+            previous_values.append(message_values)
+
+        else:
+            assert isinstance(previous_values, dict), (
+                "Accumulate is disabled yet found a list in the JSON file"
+                "User might have tampered the data manually"
+            )
+            previous_values.update(message_values)
         with open(self.get_message_json_path(message_name), "w+") as f:
             f.write(json.dumps(previous_values, **self.json_dump_options))
 

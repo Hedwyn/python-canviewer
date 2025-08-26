@@ -35,7 +35,7 @@ from rich.console import Console, Group
 from rich.live import Live
 
 from ._console import MessageTable
-from ._jsonify import JsonModel
+from ._jsonify import JsonModel, ModelConfig
 
 # Local
 from ._monitor import (
@@ -443,7 +443,18 @@ def canviewer(
     type=click.Choice(list(logging._nameToLevel), case_sensitive=False),
     help="Log level to apply",
 )
-def canviewer_jsonify(database: str, channel: str, log_level: str) -> None:
+@click.option(
+    "-a",
+    "--accumulate",
+    is_flag=True,
+    help=(
+        "When passed, stores all passed values in the message JSON file "
+        "instead of only the last one"
+    ),
+)
+def canviewer_jsonify(
+    database: str, channel: str, log_level: str, accumulate: bool
+) -> None:
     """
     database: Path to the database to JSONify
     """
@@ -454,6 +465,7 @@ def canviewer_jsonify(database: str, channel: str, log_level: str) -> None:
     )
     logging.getLogger("inotify").setLevel(logging.ERROR)
 
+    config = ModelConfig(accumulate=accumulate)
     try:
         can_db = cantools.database.load_file(database)
     except FileNotFoundError:
@@ -464,7 +476,7 @@ def canviewer_jsonify(database: str, channel: str, log_level: str) -> None:
         rich.print(f"[red] Values for message {message_name} are incorrect: {exc}")
 
     assert isinstance(can_db, Database)
-    model = JsonModel(can_db)
+    model = JsonModel(can_db, config=config)
     with can.interface.Bus(interface="socketcan", channel=channel) as bus:
         with model.open() as tmp:
             rich.print("Path to model:\n" f"[green]{tmp}")
