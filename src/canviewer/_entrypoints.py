@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -435,10 +436,24 @@ def canviewer(
     type=str,
     help="Name of the CAN channel to monitor",
 )
-def canviewer_jsonify(database: str, channel: str) -> None:
+@click.option(
+    "-l",
+    "--log-level",
+    default="ERROR",
+    type=click.Choice(list(logging._nameToLevel), case_sensitive=False),
+    help="Log level to apply",
+)
+def canviewer_jsonify(database: str, channel: str, log_level: str) -> None:
     """
     database: Path to the database to JSONify
     """
+    logging.basicConfig(
+        level=logging._nameToLevel[log_level],
+        format="{asctime}: {levelname:<7}: {threadName:<20}: {message}",
+        style="{",
+    )
+    logging.getLogger("inotify").setLevel(logging.ERROR)
+
     try:
         can_db = cantools.database.load_file(database)
     except FileNotFoundError:

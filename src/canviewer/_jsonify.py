@@ -12,6 +12,7 @@ directly from the filesystem.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from contextlib import contextmanager
@@ -28,6 +29,8 @@ from cantools.database.can.signal import Signal as CanSignal
 from cantools.database.namedsignalvalue import NamedSignalValue
 
 type CanBasicTypes = float | int | str
+
+_logger = logging.getLogger(__name__)
 
 
 def find_sound_default(signal: CanSignal) -> CanBasicTypes:
@@ -57,9 +60,22 @@ class ModelConfig:
 
 
 class JsonModel:
+    """
+    Modelizes a CAN database with one JSON file per message.
+    """
+
     def __init__(
         self, database: CanDatabase, config: ModelConfig | None = None
     ) -> None:
+        """
+        Parameters
+        ----------
+        database: CanDatabase
+            The CAN database for which we should generate JSON files
+
+        config: ModelConfig
+            User parameters on how the model should behave.
+        """
         self._config = config or ModelConfig()
         self._tmp_folder: str | None = None
         self._database = database
@@ -174,7 +190,10 @@ class JsonModel:
                 raw_message.arbitration_id
             )
         except KeyError:
-            # Not for us - nothing to do
+            _logger.debug(
+                "Ignoring %08x as it is not a known ID in our database",
+                raw_message.arbitration_id,
+            )
             return
 
         values = can_frame.decode(bytes(raw_message.data))
@@ -197,11 +216,21 @@ class JsonModel:
             if not filename.endswith(".json"):
                 continue
             if message_name in self._inotify_ignore_set:
+                _logger.debug(
+                    "Ignoring modifications on %s as this is an RX message",
+                    message_name,
+                )
                 continue
             if "IN_MODIFY" in type_names:
                 # triggering message send
                 values = self.get_message_values(message_name)
                 frame = self._database.get_message_by_name(message_name)
+                _logger.info(
+                    "%s modified, sending %s with values %s",
+                    filename,
+                    message_name,
+                    values,
+                )
                 try:
                     bus.send(
                         Message(
@@ -209,6 +238,9 @@ class JsonModel:
                         )
                     )
                 except Exception as exc:
+                    _logger.debug(
+                        "Error occured while encoding %s", message_name, exc_info=True
+                    )
                     if on_error is None:
                         raise
                     on_error(message_name, exc)
