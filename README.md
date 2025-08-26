@@ -14,6 +14,8 @@
     - [Taking snapshots](#taking-snapshots)
     - [Navigating](#navigating)
     - [Zooming in and out](#zooming-in-and-out)
+- [Other utilities](#other-utilities)
+    - [canviewer-jsonify](#canviewer-jsonify)
 - [License](#license)
 
 # Installation
@@ -108,7 +110,7 @@ This command monitors the can bus actively and odes the following:
 * **TX**: Whenever a JSON file for TX message is edited manually, the new values will be sent automatically to the CAN bus.
 
 > [!WARNING]
-> Modifications on JSON files are monitored using inotify. Any message received on the bus that's not sent by this command itself will be considered RX and filtered out from inotify monitoring, so modfying them manually will not trigger a message send.
+> Modifications on JSON files are monitored using inotify. Any message received on the bus that's not sent by this command itself will be considered RX and filtered out from inotify monitoring, so modifying them manually will not trigger a message send.
 
 ```shell
 Usage: canviewer-jsonify [OPTIONS] DATABASE

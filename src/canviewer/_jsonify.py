@@ -47,9 +47,13 @@ def find_sound_default(signal: CanSignal) -> CanBasicTypes:
         if signal.maximum:
             return float((signal.maximum + signal.minimum) / 2)
         return float(signal.minimum)
-    if signal.offset is not None:
+    if signal.offset:
         return float(signal.offset)
 
+    if signal.scale is None or signal.scale == 1.0:
+        return 0
+    else:
+        return 0.0
     raise ValueError(f"Could not find identity type of signal {signal}")
 
 
