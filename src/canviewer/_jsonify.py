@@ -170,7 +170,14 @@ class JsonModel:
         message_json_path = self.get_message_json_path(message_name)
         # reading previous values
         with open(message_json_path) as f:
-            return json.loads(f.read())  # type: ignore
+            json_data = json.loads(f.read())
+            if isinstance(json_data, list):
+                assert (
+                    len(json_data) > 0
+                ), "Found empty JSON data; user might have tampered file content manually"
+
+                return json_data[-1]  # type: ignore
+            return json_data
 
     def encode_message(self, message_name: str) -> bytes:
         """

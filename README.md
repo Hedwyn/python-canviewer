@@ -105,7 +105,7 @@ Use `+` and `-` to decrease or increase the number of lines per page.
 *Linux-only*
 
 This is an alternate entrypoint you can call with `canviewer-jsonify`. This command expects to receive the path to a database file, and will spawn one JSON file per message in a temporary folder (note: everything will be wiped on exiting the command).
-This command monitors the can bus actively and odes the following:
+This command monitors the can bus actively and does the following:
 * **RX**: everytime a message is received, the corresponding JSON file will be updated with the new values. You can watch them in real time.with `tail -f` or similar commands.
 * **TX**: Whenever a JSON file for TX message is edited manually, the new values will be sent automatically to the CAN bus.
 
