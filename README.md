@@ -98,6 +98,40 @@ To navigate through pages, you can:
 ### Zooming in and out
 Use `+` and `-` to decrease or increase the number of lines per page.
 
+# Other utilities
+## canviewer-jsonify
+*Linux-only*
+
+This is an alternate entrypoint you can call with `canviewer-jsonify`. This command expects to receive the path to a database file, and will spawn one JSON file per message in a temporary folder (note: everything will be wiped on exiting the command).
+This command monitors the can bus actively and odes the following:
+* **RX**: everytime a message is received, the corresponding JSON file will be updated with the new values. You can watch them in real time.with `tail -f` or similar commands.
+* **TX**: Whenever a JSON file for TX message is edited manually, the new values will be sent automatically to the CAN bus.
+
+> [!WARNING]
+> Modifications on JSON files are monitored using inotify. Any message received on the bus that's not sent by this command itself will be considered RX and filtered out from inotify monitoring, so modfying them manually will not trigger a message send.
+
+```shell
+Usage: canviewer-jsonify [OPTIONS] DATABASE
+
+  database: Path to the database to JSONify
+
+Options:
+  -c, --channel TEXT              Name of the CAN channel to monitor
+  -l, --log-level [critical|fatal|error|warn|warning|info|debug|notset]
+                                  Log level to apply
+  --help                          Show this message and exit.
+```
+ (e.g.) If calling `canviewer-jsonify my_database.kcd` you should get something like this:
+ ```shell
+Path to model:
+/tmp/tmp0zkw00sm
+Use Ctrl + C to leave
+ ```
+Simply `cd` to the displayed path and you shoPath to model:
+/tmp/tmp0zkw00sm
+Use Ctrl + C to leaveuld find all the JSON files for the messages in the passed database there. Files should be named following the schema `{message_name}.json`.
+
+
 
 
 
