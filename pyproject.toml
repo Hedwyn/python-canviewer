@@ -7,15 +7,13 @@ name = "canviewer"
 dynamic = ["version"]
 description = "A CLI tool providing rich monitoring of CAN data"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT"
 keywords = []
 authors = [{ name = "Hedwyn", email = "bpestourie@gmail.com" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
