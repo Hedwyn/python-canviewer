@@ -215,9 +215,9 @@ class JsonModel:
         with open(message_json_path) as f:
             json_data = json.loads(f.read())
             if isinstance(json_data, list):
-                assert (
-                    len(json_data) > 0
-                ), "Found empty JSON data; user might have tampered file content manually"
+                assert len(json_data) > 0, (
+                    "Found empty JSON data; user might have tampered file content manually"
+                )
 
                 return json_data[-1]  # type: ignore
             return json_data  # type: ignore
@@ -277,7 +277,7 @@ class JsonModel:
                     message_name,
                 )
                 continue
-            if "IN_MODIFY" in type_names:
+            if "IN_CLOSE_WRITE" in type_names:
                 # triggering message send
                 values = self.get_message_values(message_name)
                 frame = self._database.get_message_by_name(message_name)
