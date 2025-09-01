@@ -485,6 +485,16 @@ def canviewer(
         """
     ),
 )
+@click.option(
+    "-no-rx",
+    "--disable-rx",
+    is_flag=True,
+    help=(
+        "Does not monitor RX messages and uses the model only to send message. "
+        "Can be used when trying to override RX messages, "
+        "as they are by default not overwritable when being monitored"
+    ),
+)
 def canviewer_jsonify(
     database: str,
     channel: str,
@@ -493,6 +503,7 @@ def canviewer_jsonify(
     output_folder: str,
     preserve_files: bool,
     timestamps: bool,
+    disable_rx: bool,
 ) -> None:
     """
     database: Path to the database to JSONify
@@ -523,7 +534,7 @@ def canviewer_jsonify(
     model = JsonModel(can_db, config=config)
     with can.interface.Bus(interface="socketcan", channel=channel) as bus:
         with model.open() as tmp:
-            rich.print("Path to model:\n" f"[green]{tmp}")
+            rich.print(f"Path to model:\n[green]{tmp}")
             try:
                 pyperclip.copy(tmp)
                 rich.print("[green]> Path has been copied to your clipboard ! ")
@@ -531,8 +542,12 @@ def canviewer_jsonify(
                 _logger.error(
                     "Failed to copy tmp path to clipboard: %s", exc, exc_info=True
                 )
-            rich.print("Use Ctrl + C to leave")
             model.start_inotify_watcher(bus, on_error=report_error)
+            if disable_rx:
+                input("Press any key to cleanup temp files and exit...")
+                return
+
+            rich.print("Use Ctrl + C to leave")
             while True:
                 next_message = bus.recv()
                 assert next_message is not None  # value can only be None on timeout
