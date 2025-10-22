@@ -230,8 +230,10 @@ class JsonModel:
             Current signal values for the message `message_name`
         """
         current_values = self.get_message_values(message_name)
-        encoder = self._database.get_message_by_name(message_name).encode
-        return encoder(current_values)
+        encoder = self._database.get_message_by_name(
+            message_name,
+        ).encode
+        return encoder(current_values, strict=False)
 
     def update_model(self, raw_message: Message) -> None:
         """
@@ -294,7 +296,7 @@ class JsonModel:
                     bus.send(
                         Message(
                             arbitration_id=frame.frame_id,
-                            data=frame.encode(values),
+                            data=frame.encode(values, strict=False),
                             is_extended_id=is_extended_id,
                         )
                     )
