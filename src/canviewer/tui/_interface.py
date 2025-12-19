@@ -11,19 +11,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from functools import cache, cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, ContextManager, NamedTuple, Self
+from typing import TYPE_CHECKING, ContextManager, Iterator, NamedTuple, Self
 
 import cantools
+from cantools.database import Database
 from cantools.database.can.signal import Signal
+from cantools.database.diagnostics import Data, data
 from cantools.database.namedsignalvalue import NamedSignalValue
+from exhausterr import Err, Ok
 
 # textual imports
 from textual import on
 from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
+from textual.message import Message
 from textual.reactive import Reactive, reactive
 from textual.widget import Widget
 from textual.widgets import (
@@ -48,6 +52,12 @@ _logger = logging.getLogger(__name__)
 type JsonLike = dict[str, int | str | float | None | JsonLike]
 
 
+@dataclass
+class SignalValueChanged(Message):
+    widget: SignalWidget
+    value: int | str | float
+
+
 class SignalWidget(Widget):
     """
     A dynamic widget for signal value controllers that re-composes itself
@@ -55,6 +65,11 @@ class SignalWidget(Widget):
     """
 
     is_tx: Reactive[bool] = reactive(True, recompose=True)
+
+    @on(Input.Submitted)
+    def on_signal_value_edited(self, event: Input.Submitted) -> None:
+        _logger.info("SignalWidget Input changed: %s %s", event, event.input)
+        self.post_message(SignalValueChanged(widget=self, value=event.value))
 
     def compose(self) -> ComposeResult:
         """
@@ -151,9 +166,13 @@ class SignalID:
     message/signal pairs exist across databases.
     """
 
+    db_name: str
     message: str
     signal: str
-    db_name: str | None = None
+
+    @classmethod
+    def from_identifier(cls, identifier: str) -> Self:
+        return cls(*identifier.split("-"))
 
     @property
     def identifier(self) -> str:
@@ -163,9 +182,7 @@ class SignalID:
         str
             A single-string identifier for this signal ID.
         """
-        if self.db_name:
-            return f"{self.db_name}-{self.message}-{self.signal}"
-        return f"{self.message}-{self.signal}"
+        return f"{self.db_name}-{self.message}-{self.signal}"
 
     @property
     def query_key(self) -> str:
@@ -207,6 +224,48 @@ class NamedSignalWidget(NamedTuple):
 type CustomRules = object
 
 
+@dataclass
+class DatabaseStore:
+    """
+    Stores multiple CAN databases at once and provides primitives
+    to find messages in them.
+    """
+
+    databases: list[NamedDatabase] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[NamedDatabase]:
+        """
+        Yields
+        ------
+        NamedDatabase
+            All the stored databases.
+        """
+        yield from self.databases
+
+    def find_message_and_db(self, message_name: str) -> tuple[CanFrame, NamedDatabase]:
+        """
+        Looks for message `message_name` in all registered databases
+        and returns both the message and the database in which it's declared.
+        """
+        for db in self.databases:
+            if (msg := db.get_message_by_name(message_name)) is not None:
+                return msg, db
+        raise ValueError(
+            f"Message named {message_name} was queried internally "
+            "but not found in any DB"
+        )
+
+    def find_message(self, message_name: str) -> CanFrame:
+        """
+        Looks for message `message_name` in all registered databases.
+        """
+        return self.find_message_and_db(message_name)[0]
+
+    @classmethod
+    def from_files(cls, *db_files: str) -> Self:
+        return cls([NamedDatabase.load_from_file(f) for f in db_files])
+
+
 class WidgetDispatcher:
     """
     Given a set of signal/message properties and custom constraints,
@@ -215,24 +274,31 @@ class WidgetDispatcher:
     """
 
     def __init__(
-        self, *databases: NamedDatabase, custom_rules: CustomRules | None = None
+        self, database_stores: DatabaseStore, custom_rules: CustomRules | None = None
     ) -> None:
-        self._databases = databases
+        self._database_store = database_stores
         if custom_rules is not None:
             raise NotImplementedError("Custom rules not available yet")
         self.custom_rules = custom_rules
+
+    def _find_message_and_db(self, message_name: str) -> tuple[CanFrame, NamedDatabase]:
+        """
+        Looks for message `message_name` in all registered databases
+        and returns both the message and the database in which it's declared.
+        """
+        for db in self._database_store:
+            if (msg := db.get_message_by_name(message_name)) is not None:
+                return msg, db
+        raise ValueError(
+            f"Message named {message_name} was queried internally "
+            "but not found in any DB"
+        )
 
     def _find_message(self, message_name: str) -> CanFrame:
         """
         Looks for message `message_name` in all registered databases.
         """
-        for db in self._databases:
-            if (msg := db.get_message_by_name(message_name)) is not None:
-                return msg
-        raise ValueError(
-            f"Message named {message_name} was queried internally "
-            "but not found in any DB"
-        )
+        return self._database_store.find_message_and_db(message_name)[0]
 
     @cache
     def extract_signal_properties(
@@ -299,7 +365,7 @@ class WidgetDispatcher:
         Exports a serialized version of the signal properties.
         """
         output: JsonLike = {}
-        for db in self._databases:
+        for db in self._database_store:
             for message in db.messages:
                 for signal in message.signals:
                     key = f"{message.name}:{signal.name}"
@@ -317,10 +383,11 @@ class WidgetDispatcher:
         """
         Dispatches an appropriate Widget to repsent the given signal.
         """
-        frame = self._find_message(message_name)
+        frame, db = self._database_store.find_message_and_db(message_name)
         signal = frame.get_signal_by_name(signal_name)
         properties = self.extract_signal_properties(signal, *frame.senders)
         signal_id = SignalID(
+            db_name=db.name,
             message=message_name,
             signal=signal.name,
         )
@@ -335,17 +402,13 @@ class Backend:
     Manages all the internal operations of the application.
     """
 
-    def __init__(self, *databases: str, **can_params: str | int) -> None:
-        self._databases = databases
+    def __init__(
+        self, database_store: DatabaseStore | None = None, **can_params: str | int
+    ) -> None:
+        self._database_store = database_store or DatabaseStore()
         self._monitor: CanMonitor | None = None
         self.can_params = can_params
-
-    @cached_property
-    def databases(self) -> tuple[NamedDatabase, ...]:
-        """
-        Lazily loads all databases on first access.
-        """
-        return tuple((NamedDatabase.load_from_file(db) for db in self._databases))
+        self._value_store: dict[SignalID, dict[str, CanTypes]] = {}
 
     @property
     def monitor(self) -> CanMonitor:
@@ -356,14 +419,44 @@ class Backend:
             raise RuntimeError("No monitor attached")
         return self._monitor
 
+    @property
+    def database_store(self) -> DatabaseStore:
+        return self._database_store
+
     def start(self, loop: AbstractEventLoop | None = None) -> None:
         """
         Starts the CAN monitoring loop.
         """
+        self.initialize_value_store()
         loop = loop or asyncio.get_running_loop()
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
         _logger.info("Created task")
+
+    def initialize_value_store(self) -> None:
+        for db in self._database_store:
+            for msg in db.messages:
+                msg_dict: dict[str, CanTypes] = {}
+                for signal in msg.signals:
+                    signal_id = SignalID(db.name, msg.name, signal.name)
+                    self._value_store[signal_id] = msg_dict
+                    # TODO: compute a proper default
+                    msg_dict[signal_id.signal] = 0
+
+    def update_signal_value(
+        self, signal_id: SignalID, value: CanTypes, send_now: bool = False
+    ) -> None:
+        msg_dict = self._value_store[signal_id]
+        msg_dict[signal_id.signal] = value
+        if not send_now:
+            return
+        frame = self._database_store.find_message(signal_id.message)
+        # TODO: create proper dedicated object
+        payload = can.Message(
+            arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
+        )
+        _logger.info("Sending %s", payload)
+        self.monitor.bus.send(payload)
 
     async def _watch_monitor(self) -> None:
         """
@@ -371,10 +464,15 @@ class Backend:
         """
         _logger.info("Backend starting with params %s", self.can_params)
         with can.Bus(**self.can_params) as bus:  # type: ignore[arg-type]
-            self._monitor = CanMonitor(bus, *(db.database for db in self.databases))
+            self._monitor = CanMonitor(
+                bus, *(db.database for db in self._database_store)
+            )
             while True:
-                msg = await self.monitor.queue.get()
-                _logger.info("%s", msg)
+                match await self.monitor.queue.get():
+                    case Ok(msg):
+                        _logger.debug("%s", msg)
+                    case Err(err):
+                        _logger.error("Decoding failed: %s", err)
 
 
 class CanViewer(App[None]):
@@ -397,7 +495,7 @@ class CanViewer(App[None]):
         super().__init__(driver_class, css_path, watch_css, ansi_color)
         self._config = config or TUIConfig()
         self._backend = backend
-        self._dispatcher = dispatcher or WidgetDispatcher(*backend.databases)
+        self._dispatcher = dispatcher or WidgetDispatcher(backend._database_store)
         self._producers: dict[
             str, str | None
         ] = {}  # maps each database to its selected producer
@@ -457,6 +555,13 @@ class CanViewer(App[None]):
             yield Label(content=title)
             yield widget
             self._signal_properties[signal_id] = properties
+            # checking that we can retrive
+            assert (
+                self._signal_properties.get(
+                    SignalID.from_identifier(signal_id.identifier)
+                )
+                is not None
+            )
 
     def compose(self) -> ComposeResult:
         """
@@ -477,7 +582,7 @@ class CanViewer(App[None]):
                 else contextlib.nullcontext()
             )
 
-        for db in self._backend.databases:
+        for db in self._backend.database_store:
             # showing nodes
             default_node: str | None = None
             if db.nodes:
@@ -504,9 +609,15 @@ class CanViewer(App[None]):
                         yield from self._compose_message_widgets(msg)
 
     # --- Handlers on signal widgets interactions --- #
-    @on(Input.Submitted)
-    def on_signal_value_edited(self, event: Input.Submitted) -> None:
-        _logger.info("Input changed: %s", event)
+    @on(SignalValueChanged)
+    def on_signal_value_edited(self, event: SignalValueChanged) -> None:
+        _logger.info("Signal value changed")
+        assert event.widget.id is not None, "All SignalValue widgets should have an ID"
+        signal_id = SignalID.from_identifier(event.widget.id)
+        properties = self._signal_properties[signal_id]
+        converted_value = properties.signal_type(event.value)
+        _logger.info("Updating signal value %s to %s", signal_id, converted_value)
+        self._backend.update_signal_value(signal_id, converted_value, send_now=True)
 
     @on(RadioSet.Changed)
     def on_producer_changed(self, event: RadioSet.Changed) -> None:
@@ -537,12 +648,14 @@ if __name__ == "__main__":
     import json
 
     import can
+    import sys
 
     logging.basicConfig(filename="tui.log", level=logging.INFO)
 
     _logger.info("Hello world")
-    backend = Backend("ADM_PC_BP25.kcd", channel="vcan0", interface="socketcan")
-    dispatcher = WidgetDispatcher(*backend.databases)
+    store = DatabaseStore.from_files(*sys.argv[1:])
+    backend = Backend(store, channel="vcan0", interface="socketcan")
+    dispatcher = WidgetDispatcher(store)
     with open("widgets.json", "w+") as f:
         f.write(json.dumps((dispatcher.serialize_model()), indent=4, default=str))
     viewer = CanViewer(backend=backend)
