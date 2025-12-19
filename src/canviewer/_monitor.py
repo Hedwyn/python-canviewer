@@ -172,6 +172,10 @@ class CanMonitor:
             self._id_pattern = None
 
     @property
+    def bus(self) -> Any:  # TODO:type hint
+        return self._bus
+
+    @property
     def queue(self) -> Queue:
         """
         Returns
