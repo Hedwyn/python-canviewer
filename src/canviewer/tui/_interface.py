@@ -74,7 +74,7 @@ class SignalWidget(Container):
     when certain parameters are changed (e.g., message direction).
     """
 
-    name: Reactive[str] = reactive("", recompose=True)
+    label: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
     period: Reactive[float | None] = reactive(None)
@@ -89,12 +89,14 @@ class SignalWidget(Container):
         Defaults to Input for TX messages and Label for RX
         """
         is_tx = self.is_tx
+        value = self.current_value
+        formatted_value = hex(value) if isinstance(value, int) else str(value)
         with Horizontal():
-            yield Label(content=f"{self.name:25}")
+            yield Label(content=f"{self.label:25}")
             if is_tx:
-                yield Input(value=str(self.current_value))
+                yield Input(value=formatted_value)
             else:
-                yield Label(content=str(self.current_value))
+                yield Label(content=formatted_value)
 
 
 @dataclass
@@ -173,6 +175,24 @@ class SignalProperties:
     max_value: float | None = None
     choices: tuple[str | int, ...] | None = None
     senders: tuple[str, ...] = ()
+
+    def find_sound_default(self: SignalProperties) -> CanTypes:
+        """
+        Finds a reasonable default value of a given decalred CAN signal.
+        """
+        minimum = self.min_value
+        maximum = self.max_value
+        if minimum is not None:
+            if maximum:
+                return int((minimum + maximum) / 2)
+            return minimum
+        if self.choices is not None:
+            assert len(self.choices) > 0
+            first_option = self.choices[0]
+            if isinstance(first_option, NamedSignalValue):
+                return str(first_option)
+            return first_option
+        return 0
 
 
 class NamedSignalWidget(NamedTuple):
@@ -315,6 +335,9 @@ class WidgetDispatcher:
             signal=signal.name,
         )
         widget = SignalWidget(id=signal_id.identifier)
+        value = properties.find_sound_default()
+        widget.current_value = value
+        _logger.info("Setting signal %s to value %s", signal.name, value)
         return NamedSignalWidget(
             signal_id=signal_id, widget=widget, properties=properties
         )
@@ -375,7 +398,12 @@ class Backend:
 
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
-        # NOTE: order matters, these task should be created after above one.
+
+    def _start_senders(self, loop: AbstractEventLoop | None = None) -> None:
+        """
+        Starts all periodic messages senders.
+        """
+        loop = loop or asyncio.get_running_loop()
         for msg in self.database_store.iter_periodic_messages():
             self._periodic_messages[msg] = loop.create_task(
                 self._send_periodic_message_task(msg)
@@ -528,7 +556,7 @@ class CanViewer(App[None]):
                 message.name, signal.name, 0, is_tx=is_tx
             )
             title = f"{signal.name:25}"
-            widget.name = title
+            widget.label = title
             yield widget
             self._signal_properties[signal_id] = properties
             # checking that we can retrive
