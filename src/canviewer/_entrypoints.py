@@ -30,6 +30,8 @@ import click
 import pyperclip
 import rich
 from cantools.database.can import Database
+
+# 3rd-party
 from exhausterr import Err, Ok
 from rich.console import Console, Group
 from rich.live import Live
@@ -40,6 +42,7 @@ from ._jsonify import JsonModel, ModelConfig
 # Local
 from ._monitor import (
     CanMonitor,
+    DatabaseStore,
     get_platform_default_channel,
     get_platform_default_driver,
 )
@@ -130,7 +133,7 @@ class UserInterface:
 async def _canviewer(
     channel: str,
     driver: str,
-    databases: Iterable[Database],
+    databases: Iterable[str],
     ignore_unknown_messages: bool,
     message_filters: Iterable[int | str],
     single_message: str | None = None,
@@ -153,7 +156,7 @@ async def _canviewer(
     driver: str
         The name of the CAN driver (interface)
 
-    databases: Iterable[Database]
+    databases: Iterable[str]
         The paths to .kcd files or to a folder containing kcd files
     """
     message_table = MessageTable(
@@ -202,7 +205,7 @@ async def _canviewer(
             loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
             backend = CanMonitor(
                 bus,
-                *databases,
+                DatabaseStore.from_files(*databases),
                 mask=mask,
                 id_pattern=id_pattern,
                 always_show_value=always_show_value,
@@ -422,15 +425,11 @@ def canviewer(
     converted_filters: list[int | str] = [
         int(f) if f.isnumeric() else f for f in filters
     ]
-    loaded_dbs: Iterable[Database] = map(
-        cantools.database.load_file,  # type: ignore[arg-type]
-        collect_databases(*databases),
-    )
     asyncio.run(
         _canviewer(
             channel,
             driver,
-            loaded_dbs,
+            collect_databases(*databases),
             ignore_unknown_messages,
             converted_filters,
             single_message=single_message,
