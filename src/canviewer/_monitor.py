@@ -14,11 +14,11 @@ import platform
 from asyncio import Queue
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Iterator, Union, cast
+from typing import ClassVar, Iterator, Self, Union, cast
 
+import cantools
 from can import BusABC
 from can import Message as CanMessage
-import cantools
 from cantools.database.can import Database as CanDatabase  # type: ignore[attr-defined]
 from cantools.database.can.message import Message as CanFrame
 from cantools.database.namedsignalvalue import NamedSignalValue
@@ -170,6 +170,12 @@ class DatabaseStore:
     def from_files(cls, *db_files: str) -> Self:
         return cls([NamedDatabase.load_from_file(f) for f in db_files])
 
+    def iter_periodic_messages(self) -> Iterator[CanFrame]:
+        for db in self.databases:
+            for message in db.messages:
+                if message.cycle_time is not None:
+                    yield message
+
 
 @dataclass
 class DecodedMessage:
@@ -264,7 +270,7 @@ class CanMonitor:
         self._loop.add_reader(self._bus, self.handler)
         self._mask = mask
         if id_pattern is not None:
-            self._id_pattern = (
+            self._id_pattern: CanIdPattern | None = (
                 id_pattern
                 if isinstance(id_pattern, CanIdPattern)
                 else CanIdPattern(id_pattern, ~mask)
@@ -273,7 +279,7 @@ class CanMonitor:
             self._id_pattern = None
 
     @property
-    def bus(self) -> Any:  # TODO:type hint
+    def bus(self) -> BusABC:  # TODO:type hint
         return self._bus
 
     @property
@@ -357,17 +363,4 @@ class CanMonitor:
         if self._id_pattern is not None:
             if not (self._id_pattern.match(can_id)):
                 return
-
         self._queue.put_nowait(self.decode_message(next_message))
-
-
-class CanActiveMonitor(CanMonitor):
-    def __init__(
-        self,
-        bus: BusABC,
-        *can_dbs: CanDatabase,
-        loop: asyncio.AbstractEventLoop | None = None,
-        mask: int = 0xFFFF_FFFF,
-        id_pattern: CanIdPattern | int | None = None,
-    ) -> None:
-        super().__init__(bus, *can_dbs, loop, mask, id_pattern)
