@@ -14,7 +14,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from functools import cache, cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, ContextManager, Iterator, NamedTuple, Self
+from typing import TYPE_CHECKING, Callable, ContextManager, Iterator, NamedTuple, Self
 
 import cantools
 from cantools.database import Database
@@ -38,7 +38,13 @@ from textual.widgets import (
     RadioSet,
 )
 
-from canviewer._monitor import CanDatabase, CanFrame, CanMonitor, CanTypes
+from canviewer._monitor import (
+    CanDatabase,
+    CanFrame,
+    CanMonitor,
+    CanTypes,
+    DecodedMessage,
+)
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
@@ -53,9 +59,15 @@ type JsonLike = dict[str, int | str | float | None | JsonLike]
 
 
 @dataclass
-class SignalValueChanged(Message):
+class SignalValueEdited(Message):
     widget: SignalWidget
     value: int | str | float
+
+
+@dataclass
+class SignalValueChanged(Message):
+    signal_id: SignalID
+    value: CanTypes
 
 
 class SignalWidget(Widget):
@@ -65,11 +77,12 @@ class SignalWidget(Widget):
     """
 
     is_tx: Reactive[bool] = reactive(True, recompose=True)
+    current_value: Reactive[CanTypes] = reactive("0", recompose=True)
 
     @on(Input.Submitted)
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
         _logger.info("SignalWidget Input changed: %s %s", event, event.input)
-        self.post_message(SignalValueChanged(widget=self, value=event.value))
+        self.post_message(SignalValueEdited(widget=self, value=event.value))
 
     def compose(self) -> ComposeResult:
         """
@@ -77,9 +90,9 @@ class SignalWidget(Widget):
         """
         is_tx = self.is_tx
         if is_tx:
-            yield Input(value="0")
+            yield Input(value=str(self.current_value))
         else:
-            yield Label(content="0")
+            yield Label(content=str(self.current_value))
 
 
 @dataclass
@@ -169,6 +182,9 @@ class SignalID:
     db_name: str
     message: str
     signal: str
+
+    def __str__(self) -> str:
+        return self.identifier
 
     @classmethod
     def from_identifier(cls, identifier: str) -> Self:
@@ -397,16 +413,22 @@ class WidgetDispatcher:
         )
 
 
+type MessageCallback = Callable[[DecodedMessage], None]
+
+
 class Backend:
     """
     Manages all the internal operations of the application.
     """
 
     def __init__(
-        self, database_store: DatabaseStore | None = None, **can_params: str | int
+        self,
+        database_store: DatabaseStore | None = None,
+        **can_params: str | int,
     ) -> None:
         self._database_store = database_store or DatabaseStore()
         self._monitor: CanMonitor | None = None
+        self._message_callbacks: list[MessageCallback] = []
         self.can_params = can_params
         self._value_store: dict[SignalID, dict[str, CanTypes]] = {}
 
@@ -421,7 +443,14 @@ class Backend:
 
     @property
     def database_store(self) -> DatabaseStore:
+        """
+        The collection of databases defining the CAN messages
+        monitored by this backend.
+        """
         return self._database_store
+
+    def add_message_callback(self, callback: MessageCallback) -> None:
+        self._message_callbacks.append(callback)
 
     def start(self, loop: AbstractEventLoop | None = None) -> None:
         """
@@ -469,8 +498,11 @@ class Backend:
             )
             while True:
                 match await self.monitor.queue.get():
-                    case Ok(msg):
-                        _logger.debug("%s", msg)
+                    case Ok(decoded_msg):
+                        _logger.info("Received: %s", decoded_msg)
+                        for on_message in self._message_callbacks:
+                            # TODO: catch
+                            on_message(decoded_msg)
                     case Err(err):
                         _logger.error("Decoding failed: %s", err)
 
@@ -509,6 +541,7 @@ class CanViewer(App[None]):
         """
         self.call_after_refresh(self.ensure_radioset_defaults)
         self.ensure_radioset_defaults()
+        self._backend.add_message_callback(self.dispatch_new_messages_values)
         self._backend.start()
 
     def get_selected_producer(self, database_name: str) -> str | None:
@@ -608,9 +641,33 @@ class CanViewer(App[None]):
                     with msg_collapsible():
                         yield from self._compose_message_widgets(msg)
 
+    def dispatch_new_messages_values(self, decoded_msg: DecodedMessage) -> None:
+        """
+        Callback passed to the backend to display new signal values in the TUI when
+        a message is received.
+        """
+        _logger.info("Dispatching messages values %s", decoded_msg)
+        frame, db = self._backend.database_store.find_message_and_db(
+            decoded_msg.frame_name
+        )
+        for signal in frame.signals:
+            signal_id = SignalID(db.name, frame.name, signal.name)
+            # Have to ignore the mux case
+            if (value := decoded_msg.data.get(signal.name)) is None:
+                continue
+            self.post_message(SignalValueChanged(signal_id, value))
+            widget = self.query_one(signal_id.query_key, SignalWidget)
+            widget.current_value = value
+
     # --- Handlers on signal widgets interactions --- #
     @on(SignalValueChanged)
-    def on_signal_value_edited(self, event: SignalValueChanged) -> None:
+    def on_signal_value_changed(self, event: SignalValueChanged) -> None:
+        _logger.info(
+            "Modifying displayed signal %s value to %s", event.signal_id, event.value
+        )
+
+    @on(SignalValueEdited)
+    def on_signal_value_edited(self, event: SignalValueEdited) -> None:
         _logger.info("Signal value changed")
         assert event.widget.id is not None, "All SignalValue widgets should have an ID"
         signal_id = SignalID.from_identifier(event.widget.id)
@@ -646,13 +703,11 @@ class CanViewer(App[None]):
 
 if __name__ == "__main__":
     import json
-
-    import can
     import sys
 
-    logging.basicConfig(filename="tui.log", level=logging.INFO)
+    import can
 
-    _logger.info("Hello world")
+    logging.basicConfig(filename="tui.log", level=logging.INFO)
     store = DatabaseStore.from_files(*sys.argv[1:])
     backend = Backend(store, channel="vcan0", interface="socketcan")
     dispatcher = WidgetDispatcher(store)
