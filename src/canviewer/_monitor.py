@@ -251,14 +251,14 @@ class CanMonitor:
     def __init__(
         self,
         bus: BusABC,
-        *can_dbs: CanDatabase,
+        store: DatabaseStore,
         loop: asyncio.AbstractEventLoop | None = None,
         mask: int = 0xFFFF_FFFF,
         id_pattern: CanIdPattern | int | None = None,
     ) -> None:
         self._loop = loop or asyncio.get_event_loop()
         self._queue: Queue[Result[DecodedMessage, UnknownMessage]] = Queue()
-        self._dbs = list(can_dbs)
+        self.store = store
         self._bus = bus
         # Starting the monitor
         self._loop.add_reader(self._bus, self.handler)
@@ -317,9 +317,9 @@ class CanMonitor:
         can_id = msg.arbitration_id
         # applying mask
         candidate_id = can_id & self._mask
-        for db in self._dbs:
+        for db in self.store:
             try:
-                frame = db.get_message_by_frame_id(candidate_id)
+                frame = db.database.get_message_by_frame_id(candidate_id)
                 decoded_data = frame.decode(msg.data)  # type: ignore[assignment]
                 # Have to cast because cantools does not provide necessary overloads
                 # for decode -> when decode_containers is False, returned type is dict
@@ -334,6 +334,7 @@ class CanMonitor:
                     binary=msg.data,
                     data=cast(MessageDict, decoded_data),
                     mux_selectors=selectors,
+                    db_name=db.name,
                 )
 
                 return Ok(decoded_msg)
@@ -370,4 +371,3 @@ class CanActiveMonitor(CanMonitor):
         id_pattern: CanIdPattern | int | None = None,
     ) -> None:
         super().__init__(bus, *can_dbs, loop, mask, id_pattern)
-        self._values: dict[str,]
