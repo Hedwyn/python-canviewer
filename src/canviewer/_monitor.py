@@ -174,6 +174,10 @@ class CanMonitor:
         self._always_show_value = always_show_value
 
     @property
+    def bus(self) -> Any:  # TODO:type hint
+        return self._bus
+
+    @property
     def queue(self) -> Queue:
         """
         Returns
