@@ -45,7 +45,7 @@ from canviewer._monitor import (
 )
 
 if TYPE_CHECKING:
-    from asyncio import AbstractEventLoop
+    from asyncio import AbstractEventLoop, Task
 
     from textual._path import CSSPathType
     from textual.driver import Driver
@@ -338,6 +338,12 @@ class Backend:
         self._message_callbacks: list[MessageCallback] = []
         self.can_params = can_params
         self._value_store: dict[SignalID, dict[str, CanTypes]] = {}
+        self._messages: dict[CanFrame, dict[str, CanTypes]] = {}
+
+        self._periodic_messages: dict[CanFrame, Task | None] = {}
+
+    def is_set_as_periodic(self, frame: CanFrame) -> bool:
+        return frame in self._periodic_messages
 
     @property
     def monitor(self) -> CanMonitor:
@@ -364,10 +370,16 @@ class Backend:
         Starts the CAN monitoring loop.
         """
         self.initialize_value_store()
+        # adding periodic messages
         loop = loop or asyncio.get_running_loop()
+
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
-        _logger.info("Created task")
+        # NOTE: order matters, these task should be created after above one.
+        for msg in self.database_store.iter_periodic_messages():
+            self._periodic_messages[msg] = loop.create_task(
+                self._send_periodic_message_task(msg)
+            )
 
     def initialize_value_store(self) -> None:
         for db in self._database_store:
@@ -376,12 +388,16 @@ class Backend:
                 for signal in msg.signals:
                     signal_id = SignalID(db.name, msg.name, signal.name)
                     self._value_store[signal_id] = msg_dict
+                    self._messages[msg] = msg_dict
                     # TODO: compute a proper default
                     msg_dict[signal_id.signal] = 0
 
     def update_signal_value(
         self, signal_id: SignalID, value: CanTypes, send_now: bool = False
     ) -> None:
+        """
+        Updates the stored value for a given signal internally.
+        """
         msg_dict = self._value_store[signal_id]
         msg_dict[signal_id.signal] = value
         if not send_now:
@@ -394,15 +410,35 @@ class Backend:
         _logger.info("Sending %s", payload)
         self.monitor.bus.send(payload)
 
+    async def _send_periodic_message_task(
+        self, frame: CanFrame, interval: float | None = None
+    ) -> None:
+        """
+        Sends a given message at the given interval.
+        """
+        interval = interval or frame.cycle_time
+        assert interval is not None, (
+            "Cannot send a message without specifying an interval"
+        )
+        try:
+            while True:
+                msg_dict = self._messages[frame]
+                payload = can.Message(
+                    arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
+                )
+                _logger.info("Sending %s", payload)
+                self.monitor.bus.send(payload)
+                await asyncio.sleep(interval)
+        except Exception:
+            _logger.error("Periodic sender failed", exc_info=True)
+
     async def _watch_monitor(self) -> None:
         """
         Main monitoring loop, only logs the CAN messages for now.
         """
         _logger.info("Backend starting with params %s", self.can_params)
         with can.Bus(**self.can_params) as bus:  # type: ignore[arg-type]
-            self._monitor = CanMonitor(
-                bus, *(db.database for db in self._database_store)
-            )
+            self._monitor = CanMonitor(bus, self._database_store)
             while True:
                 match await self.monitor.queue.get():
                     case Ok(decoded_msg):
