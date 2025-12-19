@@ -8,16 +8,21 @@ Queues the result to make them available to the frontend.
 """
 
 from __future__ import annotations
+
 import asyncio
-from asyncio import Queue
-from typing import Iterator, Union, ClassVar, cast
 import platform
-from dataclasses import dataclass
-from exhausterr import Result, Ok, Err, Error
-from can import Message as CanMessage, BusABC
+from asyncio import Queue
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import ClassVar, Iterator, Union, cast
+
+from can import BusABC
+from can import Message as CanMessage
+import cantools
 from cantools.database.can import Database as CanDatabase  # type: ignore[attr-defined]
 from cantools.database.can.message import Message as CanFrame
 from cantools.database.namedsignalvalue import NamedSignalValue
+from exhausterr import Err, Error, Ok, Result
 
 from ._utils import CanIdPattern
 
@@ -72,6 +77,101 @@ class MuxSelectorValue:
 
 
 @dataclass
+class NamedDatabase:
+    """
+    Adds a label to cantools database.
+    Standard use to to load using NamedDatabase.load_from_file(),
+    which will keep the filename as identifier.
+    """
+
+    name: str
+    database: CanDatabase
+
+    @property
+    def nodes(self) -> list[str]:
+        """
+        Labels given to the CAN nodes communicating on the bus
+        using the given database.
+        This will define the direction of messages based on the configured producer.
+        """
+        return [node.name for node in self.database.nodes]
+
+    @property
+    def messages(self) -> list[CanFrame]:
+        """
+        All the messages declared in the database.
+        """
+        return self.database.messages
+
+    def get_message_by_name(self, name: str) -> CanFrame | None:
+        """
+        Returns
+        -------
+        CanFrame | None
+            The frame registered under that name or None if it does not exist.
+        """
+        try:
+            return self.database.get_message_by_name(name)
+        except KeyError:
+            return None
+
+    @classmethod
+    def load_from_file(cls, path: str | Path) -> Self:
+        """
+        Loads the database from the given `path`.
+        """
+        name = Path(path).stem
+        loaded_db = cantools.database.load_file(path)
+        assert isinstance(loaded_db, CanDatabase)
+        return cls(
+            name=name,
+            database=loaded_db,
+        )
+
+
+@dataclass
+class DatabaseStore:
+    """
+    Stores multiple CAN databases at once and provides primitives
+    to find messages in them.
+    """
+
+    databases: list[NamedDatabase] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[NamedDatabase]:
+        """
+        Yields
+        ------
+        NamedDatabase
+            All the stored databases.
+        """
+        yield from self.databases
+
+    def find_message_and_db(self, message_name: str) -> tuple[CanFrame, NamedDatabase]:
+        """
+        Looks for message `message_name` in all registered databases
+        and returns both the message and the database in which it's declared.
+        """
+        for db in self.databases:
+            if (msg := db.get_message_by_name(message_name)) is not None:
+                return msg, db
+        raise ValueError(
+            f"Message named {message_name} was queried internally "
+            "but not found in any DB"
+        )
+
+    def find_message(self, message_name: str) -> CanFrame:
+        """
+        Looks for message `message_name` in all registered databases.
+        """
+        return self.find_message_and_db(message_name)[0]
+
+    @classmethod
+    def from_files(cls, *db_files: str) -> Self:
+        return cls([NamedDatabase.load_from_file(f) for f in db_files])
+
+
+@dataclass
 class DecodedMessage:
     """
     Simple container for a decoded message,
@@ -85,6 +185,7 @@ class DecodedMessage:
     binary: bytearray
     data: MessageDict
     mux_selectors: tuple[MuxSelectorValue, ...] = ()
+    db_name: str | None = None
 
     def __hash__(self) -> int:
         """
@@ -257,3 +358,16 @@ class CanMonitor:
                 return
 
         self._queue.put_nowait(self.decode_message(next_message))
+
+
+class CanActiveMonitor(CanMonitor):
+    def __init__(
+        self,
+        bus: BusABC,
+        *can_dbs: CanDatabase,
+        loop: asyncio.AbstractEventLoop | None = None,
+        mask: int = 0xFFFF_FFFF,
+        id_pattern: CanIdPattern | int | None = None,
+    ) -> None:
+        super().__init__(bus, *can_dbs, loop, mask, id_pattern)
+        self._values: dict[str,]

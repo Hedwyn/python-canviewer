@@ -9,29 +9,24 @@ Creates an appropriate widget based on the signal characteristics.
 from __future__ import annotations
 
 import asyncio
-import can
 import contextlib
 import logging
-from dataclasses import asdict, dataclass, field
-from functools import cache, cached_property
-from pathlib import Path
-from typing import TYPE_CHECKING, Callable, ContextManager, Iterator, NamedTuple, Self
+from dataclasses import asdict, dataclass
+from functools import cache
+from typing import TYPE_CHECKING, Callable, ContextManager, NamedTuple, Self
 
-import cantools
-from cantools.database import Database
+import can
 from cantools.database.can.signal import Signal
-from cantools.database.diagnostics import Data, data
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Ok
 
 # textual imports
 from textual import on
 from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import Reactive, reactive
-from textual.containers import Container, Horizontal
-from textual.widget import Widget
 from textual.widgets import (
     Collapsible,
     Input,
@@ -41,11 +36,12 @@ from textual.widgets import (
 )
 
 from canviewer._monitor import (
-    CanDatabase,
     CanFrame,
     CanMonitor,
     CanTypes,
+    DatabaseStore,
     DecodedMessage,
+    NamedDatabase,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +77,7 @@ class SignalWidget(Container):
     name: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
+    period: Reactive[float | None] = reactive(None)
 
     @on(Input.Submitted)
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
@@ -98,59 +95,6 @@ class SignalWidget(Container):
                 yield Input(value=str(self.current_value))
             else:
                 yield Label(content=str(self.current_value))
-
-
-@dataclass
-class NamedDatabase:
-    """
-    Adds a label to cantools database.
-    Standard use to to load using NamedDatabase.load_from_file(),
-    which will keep the filename as identifier.
-    """
-
-    name: str
-    database: CanDatabase
-
-    @property
-    def nodes(self) -> list[str]:
-        """
-        Labels given to the CAN nodes communicating on the bus
-        using the given database.
-        This will define the direction of messages based on the configured producer.
-        """
-        return [node.name for node in self.database.nodes]
-
-    @property
-    def messages(self) -> list[CanFrame]:
-        """
-        All the messages declared in the database.
-        """
-        return self.database.messages
-
-    def get_message_by_name(self, name: str) -> CanFrame | None:
-        """
-        Returns
-        -------
-        CanFrame | None
-            The frame registered under that name or None if it does not exist.
-        """
-        try:
-            return self.database.get_message_by_name(name)
-        except KeyError:
-            return None
-
-    @classmethod
-    def load_from_file(cls, path: str | Path) -> Self:
-        """
-        Loads the database from the given `path`.
-        """
-        name = Path(path).stem
-        loaded_db = cantools.database.load_file(path)
-        assert isinstance(loaded_db, CanDatabase)
-        return cls(
-            name=name,
-            database=loaded_db,
-        )
 
 
 @dataclass
@@ -243,48 +187,6 @@ class NamedSignalWidget(NamedTuple):
 
 # placeholder for future customization feature
 type CustomRules = object
-
-
-@dataclass
-class DatabaseStore:
-    """
-    Stores multiple CAN databases at once and provides primitives
-    to find messages in them.
-    """
-
-    databases: list[NamedDatabase] = field(default_factory=list)
-
-    def __iter__(self) -> Iterator[NamedDatabase]:
-        """
-        Yields
-        ------
-        NamedDatabase
-            All the stored databases.
-        """
-        yield from self.databases
-
-    def find_message_and_db(self, message_name: str) -> tuple[CanFrame, NamedDatabase]:
-        """
-        Looks for message `message_name` in all registered databases
-        and returns both the message and the database in which it's declared.
-        """
-        for db in self.databases:
-            if (msg := db.get_message_by_name(message_name)) is not None:
-                return msg, db
-        raise ValueError(
-            f"Message named {message_name} was queried internally "
-            "but not found in any DB"
-        )
-
-    def find_message(self, message_name: str) -> CanFrame:
-        """
-        Looks for message `message_name` in all registered databases.
-        """
-        return self.find_message_and_db(message_name)[0]
-
-    @classmethod
-    def from_files(cls, *db_files: str) -> Self:
-        return cls([NamedDatabase.load_from_file(f) for f in db_files])
 
 
 class WidgetDispatcher:
