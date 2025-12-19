@@ -30,6 +30,9 @@ dependencies = [
   "pyperclip",
 ]
 
+[project.optional-dependencies]
+tui = ["textual"]
+
 [project.urls]
 Documentation = "https://github.com/Hedwyn/python-canviewer#readme"
 Issues = "https://github.com/Hedwyn/python-canviewer/issues"
