@@ -9,6 +9,7 @@ Creates an appropriate widget based on the signal characteristics.
 from __future__ import annotations
 
 import asyncio
+import can
 import contextlib
 import logging
 from dataclasses import asdict, dataclass, field
@@ -29,6 +30,7 @@ from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import Reactive, reactive
+from textual.containers import Container, Horizontal
 from textual.widget import Widget
 from textual.widgets import (
     Collapsible,
@@ -70,12 +72,13 @@ class SignalValueChanged(Message):
     value: CanTypes
 
 
-class SignalWidget(Widget):
+class SignalWidget(Container):
     """
     A dynamic widget for signal value controllers that re-composes itself
     when certain parameters are changed (e.g., message direction).
     """
 
+    name: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
 
@@ -89,10 +92,12 @@ class SignalWidget(Widget):
         Defaults to Input for TX messages and Label for RX
         """
         is_tx = self.is_tx
-        if is_tx:
-            yield Input(value=str(self.current_value))
-        else:
-            yield Label(content=str(self.current_value))
+        with Horizontal():
+            yield Label(content=f"{self.name:25}")
+            if is_tx:
+                yield Input(value=str(self.current_value))
+            else:
+                yield Label(content=str(self.current_value))
 
 
 @dataclass
@@ -232,7 +237,7 @@ class NamedSignalWidget(NamedTuple):
     """
 
     signal_id: SignalID
-    widget: Widget
+    widget: SignalWidget
     properties: SignalProperties
 
 
@@ -585,7 +590,7 @@ class CanViewer(App[None]):
                 message.name, signal.name, 0, is_tx=is_tx
             )
             title = f"{signal.name:25}"
-            yield Label(content=title)
+            widget.name = title
             yield widget
             self._signal_properties[signal_id] = properties
             # checking that we can retrive
