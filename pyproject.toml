@@ -30,6 +30,9 @@ dependencies = [
   "pyperclip",
 ]
 
+[project.optional-dependencies]
+tui = ["textual"]
+
 [project.urls]
 Documentation = "https://github.com/Hedwyn/python-canviewer#readme"
 Issues = "https://github.com/Hedwyn/python-canviewer/issues"
@@ -37,7 +40,7 @@ Source = "https://github.com/Hedwyn/python-canviewer"
 
 [project.scripts]
 canviewer = "canviewer._entrypoints:canviewer"
-canviewer-jsonify="canviewer._entrypoints:canviewer_jsonify"
+canviewer-jsonify = "canviewer._entrypoints:canviewer_jsonify"
 
 [tool.hatch.version]
 source = "vcs"
