@@ -11,9 +11,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import asdict, dataclass
-from functools import cache
-from typing import TYPE_CHECKING, Callable, ContextManager, NamedTuple, Self
+import statistics
+import time
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from functools import cache, cached_property, reduce
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    ContextManager,
+    NamedTuple,
+    Self,
+    reveal_type,
+)
 
 import can
 from cantools.database.can.signal import Signal
@@ -29,6 +39,7 @@ from textual.message import Message
 from textual.reactive import Reactive, reactive
 from textual.widgets import (
     Collapsible,
+    Digits,
     Input,
     Label,
     RadioButton,
@@ -44,6 +55,9 @@ from canviewer._monitor import (
     NamedDatabase,
 )
 
+HISTORY_REFRESH_PERIOD = (
+    1.0  # seconds, how much time before refreshing message count history
+)
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Task
 
@@ -68,6 +82,24 @@ class SignalValueChanged(Message):
     value: CanTypes
 
 
+@dataclass
+class SignalHistory:
+    count: int = 0
+    timestamps: deque[float] = field(default_factory=lambda: deque(maxlen=10))
+    values: deque[CanTypes] = field(default_factory=lambda: deque(maxlen=10))
+    last_updated: float = 0
+
+    @property
+    def estimated_period(self) -> float | None:
+        timestamps = list(self.timestamps)
+        if len(timestamps) <= 1:
+            return None
+        intervals: list[float] = []
+        for prev, next in zip(timestamps, timestamps[1:]):
+            intervals.append(next - prev)
+        return statistics.mean(intervals)
+
+
 class SignalWidget(Container):
     """
     A dynamic widget for signal value controllers that re-composes itself
@@ -77,7 +109,29 @@ class SignalWidget(Container):
     label: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
+    count: Reactive[CanTypes] = reactive("0", recompose=True)
     period: Reactive[float | None] = reactive(None)
+    measured_period: Reactive[float | None] = reactive(None)
+
+    @cached_property
+    def history(self) -> SignalHistory:
+        """
+        Created on first access.
+        """
+        return SignalHistory()
+
+    # TODO: use the event instead
+    def update_value(self, value: CanTypes, timestamp: float | None = None) -> None:
+        timestamp = timestamp or time.time()
+        history = self.history
+        self.current_value = value
+        history.values.append(value)
+        history.count += 1
+        history.timestamps.append(timestamp)
+        if (timestamp - history.last_updated) > HISTORY_REFRESH_PERIOD:
+            history.last_updated = timestamp
+            self.count = history.count
+            self.measured_period = history.estimated_period
 
     @on(Input.Submitted)
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
@@ -92,11 +146,18 @@ class SignalWidget(Container):
         value = self.current_value
         formatted_value = hex(value) if isinstance(value, int) else str(value)
         with Horizontal():
-            yield Label(content=f"{self.label:25}")
-            if is_tx:
-                yield Input(value=formatted_value)
-            else:
-                yield Label(content=formatted_value)
+            with Horizontal():
+                yield Label(content=f"{self.label:25}")
+                if is_tx:
+                    yield Input(value=formatted_value)
+                else:
+                    yield Label(content=formatted_value)
+            with Horizontal():
+                yield Label(content="Count: ")
+                yield Digits(value=f"{self.count}")
+                if self.measured_period:
+                    yield Label(content="Period: ")
+                    yield Digits(value=f"{self.measured_period:.3f}")
 
 
 @dataclass
@@ -628,7 +689,7 @@ class CanViewer(App[None]):
                 continue
             self.post_message(SignalValueChanged(signal_id, value))
             widget = self.query_one(signal_id.query_key, SignalWidget)
-            widget.current_value = value
+            widget.update_value(value)
 
     # --- Handlers on signal widgets interactions --- #
     @on(SignalValueChanged)
