@@ -15,14 +15,13 @@ import statistics
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from functools import cache, cached_property, reduce
+from functools import cache, cached_property
 from typing import (
     TYPE_CHECKING,
     Callable,
     ContextManager,
     NamedTuple,
     Self,
-    reveal_type,
 )
 
 import can
@@ -84,9 +83,17 @@ class SignalValueChanged(Message):
 
 @dataclass
 class SignalHistory:
+    values: deque[CanTypes] = field(default_factory=lambda: deque(maxlen=10))
+
+
+@dataclass
+class MessageHistory:
+    """
+    Accumulates count and timestamps for a given frame.
+    """
+
     count: int = 0
     timestamps: deque[float] = field(default_factory=lambda: deque(maxlen=10))
-    values: deque[CanTypes] = field(default_factory=lambda: deque(maxlen=10))
     last_updated: float = 0
 
     @property
@@ -100,6 +107,46 @@ class SignalHistory:
         return statistics.mean(intervals)
 
 
+class MessageStatsWidget(Container):
+    """
+    Shows statistics for a given message.
+    """
+
+    message_name: Reactive[str] = reactive("")
+    count: Reactive[CanTypes] = reactive("0", recompose=True)
+    period: Reactive[float | None] = reactive(None)
+    measured_period: Reactive[float | None] = reactive(None)
+
+    @cached_property
+    def history(self) -> MessageHistory:
+        """
+        Created on first access.
+        """
+        return MessageHistory()
+
+    def update(self, timestamp: float | None = None) -> None:
+        timestamp = timestamp or time.time()
+        history = self.history
+        history.count += 1
+        history.timestamps.append(timestamp)
+
+        if timestamp - history.last_updated > HISTORY_REFRESH_PERIOD:
+            history.last_updated = timestamp
+            self.count = history.count
+            self.measured_period = history.estimated_period
+
+    def compose(self) -> ComposeResult:
+        with Horizontal():
+            yield Label(content="Count: ")
+            yield Digits(value=f"{self.count}")
+            if self.measured_period:
+                period_hint = (
+                    f"(expected: {self.period:.1f})" if self.period is not None else ""
+                )
+                yield Label(content=f"Period: {period_hint}")
+                yield Digits(value=f"{1000 * self.measured_period:.1f}")
+
+
 class SignalWidget(Container):
     """
     A dynamic widget for signal value controllers that re-composes itself
@@ -109,9 +156,6 @@ class SignalWidget(Container):
     label: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
-    count: Reactive[CanTypes] = reactive("0", recompose=True)
-    period: Reactive[float | None] = reactive(None)
-    measured_period: Reactive[float | None] = reactive(None)
 
     @cached_property
     def history(self) -> SignalHistory:
@@ -121,17 +165,10 @@ class SignalWidget(Container):
         return SignalHistory()
 
     # TODO: use the event instead
-    def update_value(self, value: CanTypes, timestamp: float | None = None) -> None:
-        timestamp = timestamp or time.time()
+    def update_value(self, value: CanTypes) -> None:
         history = self.history
         self.current_value = value
         history.values.append(value)
-        history.count += 1
-        history.timestamps.append(timestamp)
-        if (timestamp - history.last_updated) > HISTORY_REFRESH_PERIOD:
-            history.last_updated = timestamp
-            self.count = history.count
-            self.measured_period = history.estimated_period
 
     @on(Input.Submitted)
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
@@ -152,17 +189,6 @@ class SignalWidget(Container):
                     yield Input(value=formatted_value)
                 else:
                     yield Label(content=formatted_value)
-            with Horizontal():
-                yield Label(content="Count: ")
-                yield Digits(value=f"{self.count}")
-                if self.measured_period:
-                    period_hint = (
-                        f"(expected: {self.period:.1f})"
-                        if self.period is not None
-                        else ""
-                    )
-                    yield Label(content=f"Period: {period_hint}")
-                    yield Digits(value=f"{1000 * self.measured_period:.1f}")
 
 
 @dataclass
@@ -190,7 +216,7 @@ class TUIConfig:
 @dataclass(frozen=True, eq=True)
 class SignalID:
     """
-    The identifier for a given emssage, based on its database, message and
+    The identifier for a given signal, ²based on its database, message and
     signal name combination.
     Database is optional but not passing it might creat conflict if duplicate
     message/signal pairs exist across databases.
@@ -216,6 +242,47 @@ class SignalID:
             A single-string identifier for this signal ID.
         """
         return f"{self.db_name}-{self.message}-{self.signal}"
+
+    @property
+    def query_key(self) -> str:
+        """
+        Returns
+        -------
+        str
+           The formatted identifier so it can be used
+           directly as query key.
+        """
+        return f"#{self.identifier}"
+
+
+@dataclass(frozen=True, eq=True)
+class MessageID:
+    """
+    The identifier for a given signal, ²based on its database, message and
+    signal name combination.
+    Database is optional but not passing it might creat conflict if duplicate
+    message/signal pairs exist across databases.
+    """
+
+    db_name: str
+    message: str
+
+    def __str__(self) -> str:
+        return self.identifier
+
+    @classmethod
+    def from_identifier(cls, identifier: str) -> Self:
+        return cls(*identifier.split("-"))
+
+    @property
+    def identifier(self) -> str:
+        """
+        Returns
+        -------
+        str
+            A single-string identifier for this signal ID.
+        """
+        return f"{self.db_name}-{self.message}"
 
     @property
     def query_key(self) -> str:
@@ -403,7 +470,6 @@ class WidgetDispatcher:
         widget = SignalWidget(id=signal_id.identifier)
         value = properties.find_sound_default()
         widget.current_value = value
-        widget.period = frame.cycle_time
         _logger.info("Setting signal %s to value %s", signal.name, value)
         return NamedSignalWidget(
             signal_id=signal_id, widget=widget, properties=properties
@@ -573,6 +639,10 @@ class CanViewer(App[None]):
             SignalID, SignalProperties
         ] = {}  # maps each SignalWidget ID to its properties
 
+        self._message_stats: dict[
+            MessageID, MessageHistory
+        ] = {}  # maps each SignalWidget ID to its properties
+
     def on_mount(self) -> None:
         """
         Starts the backend and tweaks widgets.
@@ -610,7 +680,7 @@ class CanViewer(App[None]):
                 button.value = idx == 0
 
     def _compose_message_widgets(
-        self, message: CanFrame, is_tx: bool = True
+        self, db_name: str, message: CanFrame, is_tx: bool = True
     ) -> ComposeResult:
         """
         Yields
@@ -618,6 +688,11 @@ class CanViewer(App[None]):
         Widget
             All the signal widgets for a given CAN message.
         """
+        msg_id = MessageID(db_name, message.name)
+        msg_widget = MessageStatsWidget(name=message.name, id=msg_id.identifier)
+        msg_widget.period = message.cycle_time
+        yield msg_widget
+        self._message_stats[msg_id] = msg_widget.history
         for signal in message.signals:
             signal_id, widget, properties = self._dispatcher.dispatch(
                 message.name, signal.name, 0, is_tx=is_tx
@@ -677,7 +752,7 @@ class CanViewer(App[None]):
                         is_tx,
                     )
                     with msg_collapsible():
-                        yield from self._compose_message_widgets(msg)
+                        yield from self._compose_message_widgets(db.name, msg)
 
     def dispatch_new_messages_values(self, decoded_msg: DecodedMessage) -> None:
         """
@@ -688,6 +763,9 @@ class CanViewer(App[None]):
         frame, db = self._backend.database_store.find_message_and_db(
             decoded_msg.frame_name
         )
+        msg_id = MessageID(db.name, frame.name)
+        msg_widget = self.query_one(msg_id.query_key, MessageStatsWidget)
+        msg_widget.update(decoded_msg.timestamp)
         for signal in frame.signals:
             signal_id = SignalID(db.name, frame.name, signal.name)
             # Have to ignore the mux case
