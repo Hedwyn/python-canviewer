@@ -296,6 +296,67 @@ class MessageID:
         return f"#{self.identifier}"
 
 
+@cache
+def extract_signal_properties(signal: Signal, *senders: str) -> SignalProperties:
+    """
+    Builds the signal properties out of a cantools Signal object.
+    `senders` should provide the node names that emit the given signal.
+    """
+    signal_type: type[int | str] = int
+    if signal.choices:
+        choices: None | list[int] | list[str] = list(signal.choices)
+        assert choices
+        # Note: assumption here is that choices all have the same type
+        # assert all([(type(c) is type(choices[0]) for c in choices[1:])])
+        if isinstance(choices[0], NamedSignalValue):
+            signal_type = str
+            choices = [str(c) for c in choices]
+    else:
+        choices = None
+    min_value = _get_sound_minimum(signal)
+    max_value = _get_sound_maximum(signal)
+
+    return SignalProperties(
+        signal_type,
+        min_value,
+        max_value,
+        tuple(choices) if choices is not None else (),
+        senders,
+    )
+
+
+def _get_sound_minimum(signal: Signal) -> float | None:
+    """
+    Builds a default minimum for `signal` if possible.
+    For signal that define an explicit one, returns it immediately.
+    Otherwise, define the minimum based on signal size and sign.
+    """
+    if signal.choices:
+        return None
+    if signal.minimum is not None:
+        return signal.minimum
+    if not signal.is_signed:
+        return 0
+    exponent = signal.length - 1
+    return -(2**exponent)
+
+
+def _get_sound_maximum(signal: Signal) -> float | None:
+    """
+    Builds a default maximum for `signal` if possible.
+    For signal that define an explicit one, returns it immediately.
+    Otherwise, define the maximum based on signal size and sign.
+    """
+    if signal.choices:
+        return None
+    if signal.maximum:
+        return signal.maximum
+    exponent = signal.length
+    if signal.is_signed:
+        exponent -= 1
+    return (2**exponent) - 1
+
+
 @dataclass
 class SignalProperties:
     """
@@ -376,66 +437,6 @@ class WidgetDispatcher:
         """
         return self._database_store.find_message_and_db(message_name)[0]
 
-    @cache
-    def extract_signal_properties(
-        self, signal: Signal, *senders: str
-    ) -> SignalProperties:
-        """
-        Builds the signal properties out of a cantools Signal object.
-        `senders` should provide the node names that emit the given signal.
-        """
-        signal_type: type[int | str] = int
-        if signal.choices:
-            choices: None | list[int] | list[str] = list(signal.choices)
-            assert choices
-            # Note: assumption here is that choices all have the same type
-            # assert all([(type(c) is type(choices[0]) for c in choices[1:])])
-            if isinstance(choices[0], NamedSignalValue):
-                signal_type = str
-                choices = [str(c) for c in choices]
-        else:
-            choices = None
-        min_value = self._get_sound_minimum(signal)
-        max_value = self._get_sound_maximum(signal)
-
-        return SignalProperties(
-            signal_type,
-            min_value,
-            max_value,
-            tuple(choices) if choices is not None else (),
-            senders,
-        )
-
-    def _get_sound_minimum(self, signal: Signal) -> float | None:
-        """
-        Builds a default minimum for `signal` if possible.
-        For signal that define an explicit one, returns it immediately.
-        Otherwise, define the minimum based on signal size and sign.
-        """
-        if signal.choices:
-            return None
-        if signal.minimum is not None:
-            return signal.minimum
-        if not signal.is_signed:
-            return 0
-        exponent = signal.length - 1
-        return -(2**exponent)
-
-    def _get_sound_maximum(self, signal: Signal) -> float | None:
-        """
-        Builds a default maximum for `signal` if possible.
-        For signal that define an explicit one, returns it immediately.
-        Otherwise, define the maximum based on signal size and sign.
-        """
-        if signal.choices:
-            return None
-        if signal.maximum:
-            return signal.maximum
-        exponent = signal.length
-        if signal.is_signed:
-            exponent -= 1
-        return (2**exponent) - 1
-
     def serialize_model(self) -> JsonLike:
         """
         Exports a serialized version of the signal properties.
@@ -447,7 +448,7 @@ class WidgetDispatcher:
                     key = f"{message.name}:{signal.name}"
                     output[key] = {
                         "properties": asdict(
-                            self.extract_signal_properties(signal, *message.senders)
+                            extract_signal_properties(signal, *message.senders)
                         ),
                     }
 
@@ -461,7 +462,7 @@ class WidgetDispatcher:
         """
         frame, db = self._database_store.find_message_and_db(message_name)
         signal = frame.get_signal_by_name(signal_name)
-        properties = self.extract_signal_properties(signal, *frame.senders)
+        properties = extract_signal_properties(signal, *frame.senders)
         signal_id = SignalID(
             db_name=db.name,
             message=message_name,
@@ -495,7 +496,6 @@ class Backend:
         self.can_params = can_params
         self._value_store: dict[SignalID, dict[str, CanTypes]] = {}
         self._messages: dict[CanFrame, dict[str, CanTypes]] = {}
-
         self._periodic_messages: dict[CanFrame, Task | None] = {}
 
     def is_set_as_periodic(self, frame: CanFrame) -> bool:
@@ -531,6 +531,7 @@ class Backend:
 
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
+        self._start_senders(loop)
 
     def _start_senders(self, loop: AbstractEventLoop | None = None) -> None:
         """
@@ -546,12 +547,12 @@ class Backend:
         for db in self._database_store:
             for msg in db.messages:
                 msg_dict: dict[str, CanTypes] = {}
+                self._messages[msg] = msg_dict
                 for signal in msg.signals:
+                    properties = extract_signal_properties(signal, *msg.senders)
+                    msg_dict[signal.name] = properties.find_sound_default()
                     signal_id = SignalID(db.name, msg.name, signal.name)
                     self._value_store[signal_id] = msg_dict
-                    self._messages[msg] = msg_dict
-                    # TODO: compute a proper default
-                    msg_dict[signal_id.signal] = 0
 
     def update_signal_value(
         self, signal_id: SignalID, value: CanTypes, send_now: bool = False
@@ -587,9 +588,9 @@ class Backend:
                 payload = can.Message(
                     arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
                 )
-                _logger.info("Sending %s", payload)
+                _logger.info("Sending %s, next is %f", payload, interval)
                 self.monitor.bus.send(payload)
-                await asyncio.sleep(interval)
+                await asyncio.sleep(interval / 1000)
         except Exception:
             _logger.error("Periodic sender failed", exc_info=True)
 
