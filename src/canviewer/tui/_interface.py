@@ -156,8 +156,13 @@ class SignalWidget(Container):
                 yield Label(content="Count: ")
                 yield Digits(value=f"{self.count}")
                 if self.measured_period:
-                    yield Label(content="Period: ")
-                    yield Digits(value=f"{self.measured_period:.3f}")
+                    period_hint = (
+                        f"(expected: {self.period:.1f})"
+                        if self.period is not None
+                        else ""
+                    )
+                    yield Label(content=f"Period: {period_hint}")
+                    yield Digits(value=f"{1000 * self.measured_period:.1f}")
 
 
 @dataclass
@@ -398,6 +403,7 @@ class WidgetDispatcher:
         widget = SignalWidget(id=signal_id.identifier)
         value = properties.find_sound_default()
         widget.current_value = value
+        widget.period = frame.cycle_time
         _logger.info("Setting signal %s to value %s", signal.name, value)
         return NamedSignalWidget(
             signal_id=signal_id, widget=widget, properties=properties
