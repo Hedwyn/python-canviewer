@@ -19,3 +19,8 @@ Digits {
     width: 10%;
 }
 
+#direction{
+  text-style: bold;
+  align: center middle;
+  color: $secondary;
+}
