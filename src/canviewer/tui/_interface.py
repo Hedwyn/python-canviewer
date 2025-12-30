@@ -37,7 +37,9 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.message import Message
-from textual.reactive import Reactive, reactive
+from textual.reactive import Reactive, reactive, var
+from textual.theme import Theme
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Collapsible,
@@ -48,9 +50,10 @@ from textual.widgets import (
     Label,
     RadioButton,
     RadioSet,
+    Select,
     Switch,
 )
-from textual.theme import Theme
+from textual_slider import Slider
 
 from canviewer._monitor import (
     CanFrame,
@@ -310,6 +313,7 @@ class SignalWidget(Container):
     when certain parameters are changed (e.g., message direction).
     """
 
+    properties: Reactive[SignalProperties | None] = var(None)
     label: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
@@ -332,20 +336,29 @@ class SignalWidget(Container):
         _logger.info("SignalWidget Input changed: %s %s", event, event.input)
         self.post_message(SignalValueEdited(widget=self, value=event.value))
 
+    def get_value_widget(self) -> Widget:
+        value = self.current_value
+        formatted_value = hex(value) if isinstance(value, int) else str(value)
+        if self.is_tx:
+            properties = self.properties
+            if properties is None:
+                return Input(value=formatted_value)
+            if properties.choices:
+                options = [(str(choice), choice) for choice in properties.choices]
+                return Select(
+                    options=options, value=options[0][1], prompt="Choose Value"
+                )
+
+        return Label(content=formatted_value)
+
     def compose(self) -> ComposeResult:
         """
         Defaults to Input for TX messages and Label for RX
         """
-        is_tx = self.is_tx
-        value = self.current_value
-        formatted_value = hex(value) if isinstance(value, int) else str(value)
         with Horizontal():
             with Horizontal():
                 yield Label(content=f"{self.label:25}")
-                if is_tx:
-                    yield Input(value=formatted_value)
-                else:
-                    yield Label(content=formatted_value)
+                yield self.get_value_widget()
 
 
 @dataclass
@@ -633,7 +646,7 @@ class WidgetDispatcher:
         self, message_name: str, signal_name: str, value: CanTypes, is_tx: bool = True
     ) -> NamedSignalWidget:
         """
-        Dispatches an appropriate Widget to repsent the given signal.
+        Dispatches an appropriate Widget to represent the given signal.
         """
         frame, db = self._database_store.find_message_and_db(message_name)
         signal = frame.get_signal_by_name(signal_name)
@@ -646,6 +659,7 @@ class WidgetDispatcher:
         widget = SignalWidget(id=signal_id.identifier)
         value = properties.find_sound_default()
         widget.current_value = value
+        widget.properties = properties
         _logger.info("Setting signal %s to value %s", signal.name, value)
         return NamedSignalWidget(
             signal_id=signal_id, widget=widget, properties=properties
