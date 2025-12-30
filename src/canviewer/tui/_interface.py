@@ -83,6 +83,18 @@ _logger = logging.getLogger(__name__)
 
 type JsonLike = dict[str, int | str | float | None | JsonLike]
 
+RIGHT_ARROW = """\
+← 
+← 
+← 
+"""
+
+LEFT_ARROW = """\
+→ 
+→ 
+→ 
+"""
+
 
 @dataclass
 class SignalValueEdited(Message):
@@ -145,9 +157,9 @@ class MessageHistory:
         return statistics.mean(intervals)
 
 
-class MessageStatsWidget(Container):
+class MessageWidget(Container):
     """
-    Shows statistics for a given message.
+    Shows statistics and basic controls for a given message.
     """
 
     is_tx: Reactive[bool] = reactive(True, recompose=True)
@@ -224,6 +236,9 @@ class MessageStatsWidget(Container):
 
     def compose(self) -> ComposeResult:
         with Horizontal():
+            # direction_hint_arrow = "⇇" if self.is_tx else "⇉"
+            direction_hint_arrow = RIGHT_ARROW if self.is_tx else LEFT_ARROW
+            yield Label(content=direction_hint_arrow, id="direction")
             if self.is_tx:
                 with Horizontal(id="message-controls"):
                     if self.period is not None:
@@ -859,7 +874,7 @@ class CanViewer(App[None]):
             All the signal widgets for a given CAN message.
         """
         msg_id = MessageID(db_name, message.name)
-        msg_widget = MessageStatsWidget(name=message.name, id=msg_id.identifier)
+        msg_widget = MessageWidget(name=message.name, id=msg_id.identifier)
         msg_widget.period = message.cycle_time
         _logger.info("Message %s is TX ? %s", msg_id, is_tx)
         msg_widget.is_tx = is_tx
@@ -955,7 +970,7 @@ class CanViewer(App[None]):
             decoded_msg.frame_name
         )
         msg_id = MessageID(db.name, frame.name)
-        msg_widget = self.query_one(msg_id.query_key, MessageStatsWidget)
+        msg_widget = self.query_one(msg_id.query_key, MessageWidget)
         msg_widget.update(decoded_msg.timestamp)
         for signal in frame.signals:
             signal_id = SignalID(db.name, frame.name, signal.name)
@@ -1019,7 +1034,7 @@ class CanViewer(App[None]):
                     self._backend.start_senders()
                 else:
                     self._backend.stop_senders()
-                for msg_widget in self.query(MessageStatsWidget):
+                for msg_widget in self.query(MessageWidget):
                     if msg_widget.is_tx:
                         msg_widget.toggle_sender(event.value)
 
@@ -1060,7 +1075,7 @@ class CanViewer(App[None]):
             is_tx = new_producer in properties.senders
             widget.is_tx = is_tx
             msg_widget = self.query_one(
-                signal_id.get_message_id().query_key, MessageStatsWidget
+                signal_id.get_message_id().query_key, MessageWidget
             )
             if msg_widget.is_tx != is_tx:
                 msg_widget.is_tx = is_tx
