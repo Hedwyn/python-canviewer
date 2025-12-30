@@ -22,6 +22,7 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
+    Iterator,
     NamedTuple,
     Self,
 )
@@ -335,21 +336,35 @@ class SignalWidget(Container):
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
         _logger.info("SignalWidget Input changed: %s %s", event, event.input)
         self.post_message(SignalValueEdited(widget=self, value=event.value))
+        if self.properties and not self.properties.is_float():
+            slider = self.query_one(Slider)
+            slider.value = int(event.value)
 
-    def get_value_widget(self) -> Widget:
+    @on(Slider.Changed)
+    def on_slider_changed(self, event: Slider.Changed) -> None:
+        input = self.query_one("#value-input", Input)
+        input.value = str(event.value)
+
+    def get_value_widget(self) -> Iterator[Widget]:
         value = self.current_value
         formatted_value = hex(value) if isinstance(value, int) else str(value)
-        if self.is_tx:
-            properties = self.properties
-            if properties is None:
-                return Input(value=formatted_value)
-            if properties.choices:
-                options = [(str(choice), choice) for choice in properties.choices]
-                return Select(
-                    options=options, value=options[0][1], prompt="Choose Value"
-                )
+        if not self.is_tx:
+            yield Label(content=formatted_value)
+            return
+        properties = self.properties
+        if properties and properties.choices:
+            options = [(str(choice), choice) for choice in properties.choices]
+            yield Select(options=options, value=options[0][1], prompt="Choose Value")
+            return
 
-        return Label(content=formatted_value)
+        if properties and not properties.is_float():
+            assert isinstance(self.current_value, int)
+            yield Slider(
+                min=int(properties.min_value or 0),
+                max=int(properties.max_value or 0),
+                value=int(self.current_value),
+            )
+        yield Input(value=formatted_value, id="value-input")
 
     def compose(self) -> ComposeResult:
         """
@@ -358,7 +373,7 @@ class SignalWidget(Container):
         with Horizontal():
             with Horizontal():
                 yield Label(content=f"{self.label:25}")
-                yield self.get_value_widget()
+                yield from self.get_value_widget()
 
 
 @dataclass
@@ -494,13 +509,17 @@ def extract_signal_properties(signal: Signal, *senders: str) -> SignalProperties
         choices = None
     min_value = _get_sound_minimum(signal)
     max_value = _get_sound_maximum(signal)
+    scale = signal.conversion.scale
+    offset = signal.conversion.offset
 
     return SignalProperties(
         signal_type,
-        min_value,
-        max_value,
-        tuple(choices) if choices is not None else (),
-        senders,
+        min_value=min_value,
+        max_value=max_value,
+        scale=scale,
+        offset=offset,
+        choices=tuple(choices) if choices is not None else (),
+        senders=senders,
     )
 
 
@@ -546,8 +565,17 @@ class SignalProperties:
     signal_type: type[int] | type[float] | type[str] = int
     min_value: float | None = None
     max_value: float | None = None
+    scale: float = 1
+    offset: float = 0
     choices: tuple[str | int, ...] | None = None
     senders: tuple[str, ...] = ()
+
+    def is_float(self) -> bool:
+        if self.choices:
+            return False
+        if not isinstance(self.offset, int) or not self.offset.is_integer():
+            return False
+        return self.scale != 1
 
     def cast(self, value: str) -> CanTypes:
         """
