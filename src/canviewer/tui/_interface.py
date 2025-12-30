@@ -43,6 +43,7 @@ from textual.widgets import (
     Label,
     RadioButton,
     RadioSet,
+    Switch,
 )
 
 from canviewer._monitor import (
@@ -496,7 +497,7 @@ class Backend:
         self.can_params = can_params
         self._value_store: dict[SignalID, dict[str, CanTypes]] = {}
         self._messages: dict[CanFrame, dict[str, CanTypes]] = {}
-        self._periodic_messages: dict[CanFrame, Task | None] = {}
+        self._periodic_messages: dict[CanFrame, Task] = {}
 
     def is_set_as_periodic(self, frame: CanFrame) -> bool:
         return frame in self._periodic_messages
@@ -531,9 +532,8 @@ class Backend:
 
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
-        self._start_senders(loop)
 
-    def _start_senders(self, loop: AbstractEventLoop | None = None) -> None:
+    def start_senders(self, loop: AbstractEventLoop | None = None) -> None:
         """
         Starts all periodic messages senders.
         """
@@ -542,6 +542,14 @@ class Backend:
             self._periodic_messages[msg] = loop.create_task(
                 self._send_periodic_message_task(msg)
             )
+
+    def stop_senders(self) -> None:
+        """
+        Stops all period sender tasks.
+        """
+        for task in self._periodic_messages.values():
+            task.cancel()
+        self._periodic_messages.clear()
 
     def initialize_value_store(self) -> None:
         for db in self._database_store:
@@ -710,10 +718,25 @@ class CanViewer(App[None]):
                 is not None
             )
 
+    def _compose_main_controls_panel(self) -> ComposeResult:
+        """
+        Builds the main controls panel at the top of the UI
+        """
+        with Horizontal():
+            yield Label(content="Activate Senders")
+            yield Switch(
+                value=False,
+                animate=True,
+                id="toggle_senders",
+            )
+            yield Label("Autosend")
+            yield Switch(value=False, animate=True, id="enable_autosend")
+
     def compose(self) -> ComposeResult:
         """
         Builds the main UI layout.
         """
+        yield from self._compose_main_controls_panel()
 
         def db_collapsible() -> ContextManager:
             return (
@@ -782,6 +805,17 @@ class CanViewer(App[None]):
         _logger.info(
             "Modifying displayed signal %s value to %s", event.signal_id, event.value
         )
+
+    @on(Switch.Changed)
+    def on_switch_toggled(self, event: Switch.Changed) -> None:
+        match event.switch.id:
+            case "enable_autosend":
+                pass
+            case "toggle_senders":
+                if event.value:
+                    self._backend.start_senders()
+                else:
+                    self._backend.stop_senders()
 
     @on(SignalValueEdited)
     def on_signal_value_edited(self, event: SignalValueEdited) -> None:
