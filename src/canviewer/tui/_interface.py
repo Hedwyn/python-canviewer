@@ -25,6 +25,7 @@ from typing import (
 )
 
 import can
+from cantools.database.can import signal
 from cantools.database.can.signal import Signal
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Ok
@@ -222,10 +223,13 @@ class TUIConfig:
          Wraps each message in a collapsible
          (collapsed on startup).
 
+    autosend
+        Whether to resend values automatically when signals are edited.
     """
 
     collapse_database: bool = False
     collapse_messages: bool = True
+    autosend: bool = False
 
 
 @dataclass(frozen=True, eq=True)
@@ -243,6 +247,12 @@ class SignalID:
 
     def __str__(self) -> str:
         return self.identifier
+
+    def get_message_id(self) -> MessageID:
+        return MessageID(
+            message=self.message,
+            db_name=self.db_name,
+        )
 
     @classmethod
     def from_identifier(cls, identifier: str) -> Self:
@@ -384,6 +394,15 @@ class SignalProperties:
     max_value: float | None = None
     choices: tuple[str | int, ...] | None = None
     senders: tuple[str, ...] = ()
+
+    def cast(self, value: str) -> CanTypes:
+        """
+        Converts a string value to its expected type
+        """
+        signal_type = self.signal_type
+        if signal_type is int:
+            return int(value, 0)
+        return signal_type(value)
 
     def find_sound_default(self: SignalProperties) -> CanTypes:
         """
@@ -843,7 +862,7 @@ class CanViewer(App[None]):
     def on_switch_toggled(self, event: Switch.Changed) -> None:
         match event.switch.id:
             case "enable_autosend":
-                pass
+                self._config.autosend = event.value
             case "toggle_senders":
                 if event.value:
                     self._backend.start_senders()
@@ -856,9 +875,12 @@ class CanViewer(App[None]):
         assert event.widget.id is not None, "All SignalValue widgets should have an ID"
         signal_id = SignalID.from_identifier(event.widget.id)
         properties = self._signal_properties[signal_id]
-        converted_value = properties.signal_type(event.value)
+        assert isinstance(event.value, str)
+        converted_value = properties.cast(event.value)
         _logger.info("Updating signal value %s to %s", signal_id, converted_value)
         self._backend.update_signal_value(signal_id, converted_value, send_now=True)
+        if self._config.autosend:
+            self.post_message(SendRequest(signal_id.get_message_id()))
 
     @on(RadioSet.Changed)
     def on_producer_changed(self, event: RadioSet.Changed) -> None:
