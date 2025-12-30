@@ -92,7 +92,24 @@ class SignalValueEdited(Message):
 
 @dataclass
 class SendRequest(Message):
+    """
+    period
+        None means send once,
+        otherwise the period in seconds.
+    """
+
     message_id: MessageID
+    period: float | None = None
+
+
+@dataclass
+class StopSender(Message):
+    message_id: MessageID
+
+
+@dataclass
+class MessagePeriodChanged(Message):
+    period: float
 
 
 @dataclass
@@ -156,16 +173,62 @@ class MessageStatsWidget(Container):
             self.count = history.count
             self.measured_period = history.estimated_period
 
+    @on(Input.Changed)
+    def _on_period_changed(self, event: Input.Changed) -> None:
+        assert self.is_tx, "Period input should only be available for TX messages"
+        new_period = 1000 * float(event.value)
+        _logger.info("Changing period to %f")
+        self.post_message(MessagePeriodChanged(new_period))
+
+    @on(Switch.Changed)
+    def on_sender_enabled(self, event: Switch.Changed) -> None:
+        _logger.info("Sender enabled")
+        assert self.period is not None, (
+            "Sender toggle should not be available for non-periodic messages"
+        )
+        assert self.id is not None
+        if event.value:
+            self.post_message(
+                SendRequest(
+                    MessageID.from_identifier(self.id), period=self.period / 1000
+                )
+            )
+        else:
+            self.post_message(StopSender(MessageID.from_identifier(self.id)))
+
     @on(Button.Pressed)
     def on_send_pressed(self, _: Button.Pressed) -> None:
         assert self.id is not None
         self.post_message(SendRequest(MessageID.from_identifier(self.id)))
 
+    def toggle_sender(self, value: bool) -> None:
+        try:
+            sender_toggle = self.query_one("#toggle-sender", Switch)
+        except NoMatches:
+            assert not self.is_tx, (
+                "Message widget should have a sender toggler in TX mode"
+            )
+            return
+        with sender_toggle.prevent(Switch.Changed):
+            sender_toggle.value = value
+
     def compose(self) -> ComposeResult:
         with Horizontal():
             if self.is_tx:
                 with Horizontal(id="message-controls"):
+                    if self.period is not None:
+                        yield Switch(id="toggle-sender", value=False)
                     yield Button(label="Send")
+
+                    yield Label(content="Period (ms):")
+                    period_setter = Input(
+                        value=str(self.period) if self.period is not None else "",
+                        id="period",
+                    )
+                    if self.period is None:
+                        period_setter.disabled = True
+                    yield period_setter
+
             with Horizontal(id="message-stats"):
                 yield Label(content="Count: ")
                 yield Digits(value=f"{self.count}")
@@ -596,15 +659,31 @@ class Backend:
         )
         self.monitor.bus.send(payload)
 
+    def start_periodic_message_task(
+        self,
+        msg: CanFrame,
+        interval: float | None = None,
+        loop: AbstractEventLoop | None = None,
+    ) -> None:
+        loop = loop or asyncio.get_running_loop()
+        self._periodic_messages[msg] = loop.create_task(
+            self._send_periodic_message_task(msg, interval=interval)
+        )
+
+    def stop_periodic_message_task(
+        self,
+        msg: CanFrame,
+    ) -> None:
+        task = self._periodic_messages[msg]
+        task.cancel()
+
     def start_senders(self, loop: AbstractEventLoop | None = None) -> None:
         """
         Starts all periodic messages senders.
         """
         loop = loop or asyncio.get_running_loop()
         for msg in self.database_store.iter_periodic_messages():
-            self._periodic_messages[msg] = loop.create_task(
-                self._send_periodic_message_task(msg)
-            )
+            self.start_periodic_message_task(msg, loop=loop)
 
     def stop_senders(self) -> None:
         """
@@ -766,6 +845,7 @@ class CanViewer(App[None]):
         msg_id = MessageID(db_name, message.name)
         msg_widget = MessageStatsWidget(name=message.name, id=msg_id.identifier)
         msg_widget.period = message.cycle_time
+        _logger.info("Message %s is TX ? %s", msg_id, is_tx)
         msg_widget.is_tx = is_tx
         yield msg_widget
         self._message_stats[msg_id] = msg_widget.history
@@ -844,7 +924,9 @@ class CanViewer(App[None]):
                         is_tx,
                     )
                     with msg_collapsible():
-                        yield from self._compose_message_widgets(db.name, msg)
+                        yield from self._compose_message_widgets(
+                            db.name, msg, is_tx=is_tx
+                        )
         yield Footer()
 
     def dispatch_new_messages_values(self, decoded_msg: DecodedMessage) -> None:
@@ -877,7 +959,25 @@ class CanViewer(App[None]):
 
     @on(SendRequest)
     def on_send_request(self, event: SendRequest) -> None:
-        self._backend.send_single_message(event.message_id)
+        if event.period is None:
+            self._backend.send_single_message(event.message_id)
+            return
+        # period case
+        # TODO: move this logic to backend
+        msg_id = event.message_id
+        frame = self._backend.database_store.find_message(
+            msg_id.message, msg_id.db_name
+        )
+        self._backend.start_periodic_message_task(frame, event.period)
+
+    @on(StopSender)
+    def on_stop_sender(self, event: StopSender) -> None:
+        # TODO: move this logic to backend
+        msg_id = event.message_id
+        frame = self._backend.database_store.find_message(
+            msg_id.message, msg_id.db_name
+        )
+        self._backend.stop_periodic_message_task(frame)
 
     @on(Switch.Changed)
     def on_switch_toggled(self, event: Switch.Changed) -> None:
@@ -889,6 +989,9 @@ class CanViewer(App[None]):
                     self._backend.start_senders()
                 else:
                     self._backend.stop_senders()
+                for msg_widget in self.query(MessageStatsWidget):
+                    if msg_widget.is_tx:
+                        msg_widget.toggle_sender(event.value)
 
     @on(SignalValueEdited)
     def on_signal_value_edited(self, event: SignalValueEdited) -> None:
@@ -926,3 +1029,8 @@ class CanViewer(App[None]):
             assert isinstance(widget, SignalWidget)
             is_tx = new_producer in properties.senders
             widget.is_tx = is_tx
+            msg_widget = self.query_one(
+                signal_id.get_message_id().query_key, MessageStatsWidget
+            )
+            if msg_widget.is_tx != is_tx:
+                msg_widget.is_tx = is_tx
