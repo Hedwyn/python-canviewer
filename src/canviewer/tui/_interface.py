@@ -16,16 +16,17 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from functools import cache, cached_property
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Callable,
+    ClassVar,
     ContextManager,
     NamedTuple,
     Self,
 )
 
 import can
-from cantools.database.can import signal
 from cantools.database.can.signal import Signal
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Ok
@@ -41,6 +42,8 @@ from textual.widgets import (
     Button,
     Collapsible,
     Digits,
+    Footer,
+    Header,
     Input,
     Label,
     RadioButton,
@@ -56,6 +59,8 @@ from canviewer._monitor import (
     DecodedMessage,
     NamedDatabase,
 )
+
+TCSS_PATH = Path(__file__).parent / "canviewer.tcss"
 
 HISTORY_REFRESH_PERIOD = (
     1.0  # seconds, how much time before refreshing message count history
@@ -673,6 +678,8 @@ class CanViewer(App[None]):
     builds a UI dynamically to control all signals from these databases.
     """
 
+    CSS_PATH: ClassVar[str] = TCSS_PATH
+
     def __init__(
         self,
         backend: Backend,
@@ -783,6 +790,7 @@ class CanViewer(App[None]):
         """
         Builds the main UI layout.
         """
+        yield Header()
         yield from self._compose_main_controls_panel()
 
         def db_collapsible() -> ContextManager:
@@ -824,6 +832,7 @@ class CanViewer(App[None]):
                     )
                     with msg_collapsible():
                         yield from self._compose_message_widgets(db.name, msg)
+        yield Footer()
 
     def dispatch_new_messages_values(self, decoded_msg: DecodedMessage) -> None:
         """
@@ -880,8 +889,6 @@ class CanViewer(App[None]):
         self._backend.update_signal_value(
             signal_id, converted_value, send_now=self._config.autosend
         )
-        # if self._config.autosend:
-        #     self.post_message(SendRequest(signal_id.get_message_id()))
 
     @on(RadioSet.Changed)
     def on_producer_changed(self, event: RadioSet.Changed) -> None:
