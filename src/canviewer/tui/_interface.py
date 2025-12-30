@@ -37,6 +37,7 @@ from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import Reactive, reactive
 from textual.widgets import (
+    Button,
     Collapsible,
     Digits,
     Input,
@@ -77,6 +78,11 @@ class SignalValueEdited(Message):
 
 
 @dataclass
+class SendRequest(Message):
+    message_id: MessageID
+
+
+@dataclass
 class SignalValueChanged(Message):
     signal_id: SignalID
     value: CanTypes
@@ -113,6 +119,7 @@ class MessageStatsWidget(Container):
     Shows statistics for a given message.
     """
 
+    is_tx: Reactive[bool] = reactive(True, recompose=True)
     message_name: Reactive[str] = reactive("")
     count: Reactive[CanTypes] = reactive("0", recompose=True)
     period: Reactive[float | None] = reactive(None)
@@ -136,8 +143,15 @@ class MessageStatsWidget(Container):
             self.count = history.count
             self.measured_period = history.estimated_period
 
+    @on(Button.Pressed)
+    def on_send_pressed(self, _: Button.Pressed) -> None:
+        assert self.id is not None
+        self.post_message(SendRequest(MessageID.from_identifier(self.id)))
+
     def compose(self) -> ComposeResult:
         with Horizontal():
+            if self.is_tx:
+                yield Button(label="Send")
             yield Label(content="Count: ")
             yield Digits(value=f"{self.count}")
             if self.measured_period:
@@ -533,6 +547,20 @@ class Backend:
         assert loop is not None, "Not running in async context"
         loop.create_task(self._watch_monitor())
 
+    def send_single_message(self, message_id: MessageID) -> None:
+        """
+        Sends the current values for `message_id` one time immeditaly.
+        """
+        requested_frame = self.database_store.find_message(
+            message_id.message, db_name=message_id.db_name
+        )
+        _logger.info("Sending message %s", requested_frame.name)
+        values = self._messages[requested_frame]
+        payload = can.Message(
+            arbitration_id=requested_frame.frame_id, data=requested_frame.encode(values)
+        )
+        self.monitor.bus.send(payload)
+
     def start_senders(self, loop: AbstractEventLoop | None = None) -> None:
         """
         Starts all periodic messages senders.
@@ -700,6 +728,7 @@ class CanViewer(App[None]):
         msg_id = MessageID(db_name, message.name)
         msg_widget = MessageStatsWidget(name=message.name, id=msg_id.identifier)
         msg_widget.period = message.cycle_time
+        msg_widget.is_tx = is_tx
         yield msg_widget
         self._message_stats[msg_id] = msg_widget.history
         for signal in message.signals:
@@ -805,6 +834,10 @@ class CanViewer(App[None]):
         _logger.info(
             "Modifying displayed signal %s value to %s", event.signal_id, event.value
         )
+
+    @on(SendRequest)
+    def on_send_request(self, event: SendRequest) -> None:
+        self._backend.send_single_message(event.message_id)
 
     @on(Switch.Changed)
     def on_switch_toggled(self, event: Switch.Changed) -> None:
