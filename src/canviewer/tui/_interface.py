@@ -619,8 +619,7 @@ class Backend:
         msg_dict[signal_id.signal] = value
         if not send_now:
             return
-        frame = self._database_store.find_message(signal_id.message)
-        # TODO: create proper dedicated object
+        frame = self._database_store.find_message(signal_id.message, signal_id.db_name)
         payload = can.Message(
             arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
         )
@@ -878,9 +877,11 @@ class CanViewer(App[None]):
         assert isinstance(event.value, str)
         converted_value = properties.cast(event.value)
         _logger.info("Updating signal value %s to %s", signal_id, converted_value)
-        self._backend.update_signal_value(signal_id, converted_value, send_now=True)
-        if self._config.autosend:
-            self.post_message(SendRequest(signal_id.get_message_id()))
+        self._backend.update_signal_value(
+            signal_id, converted_value, send_now=self._config.autosend
+        )
+        # if self._config.autosend:
+        #     self.post_message(SendRequest(signal_id.get_message_id()))
 
     @on(RadioSet.Changed)
     def on_producer_changed(self, event: RadioSet.Changed) -> None:
