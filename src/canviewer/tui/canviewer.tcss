@@ -1,1 +1,21 @@
 
+#main-controls {
+    height: 3;
+    align: center middle;
+    background: $panel;
+}
+#message-controls {
+    height: 3;
+    background: $panel;
+}
+#message-stats{
+    height: 3;
+    align: right middle;
+    background: $panel;
+}
+Digits {
+    background: $surface;
+    color: $primary;
+    width: 10%;
+}
+
