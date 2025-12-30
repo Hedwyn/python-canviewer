@@ -35,7 +35,7 @@ from exhausterr import Err, Ok
 # textual imports
 from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import Reactive, reactive, var
@@ -196,6 +196,16 @@ class MessageCollapsible(Collapsible):
                 yield Switch(value=True)
         with self.Contents():
             yield from self._contents_list
+
+
+class LazyContainer(Container):
+    widgets: Reactive[tuple[Widget, ...]] = reactive(tuple())
+    loaded: Reactive[bool] = reactive(False, recompose=True)
+
+    def compose(self):
+        with Vertical():
+            if self.loaded:
+                yield from self.widgets
 
 
 class MessageWidget(Container):
@@ -1012,9 +1022,9 @@ class CanViewer(App[None]):
                 else contextlib.nullcontext()
             )
 
-        def msg_collapsible() -> ContextManager:
+        def msg_collapsible(id: str | None = None) -> ContextManager:
             return (
-                MessageCollapsible(title=msg.name)
+                MessageCollapsible(title=msg.name, id=id)
                 if self._config.collapse_messages
                 else contextlib.nullcontext()
             )
@@ -1042,11 +1052,20 @@ class CanViewer(App[None]):
                         default_node,
                         is_tx,
                     )
-                    with msg_collapsible():
-                        yield from self._compose_message_widgets(
-                            db.name, msg, is_tx=is_tx
+                    msg_id = MessageID(db.name, msg.name)
+                    with msg_collapsible(id=msg_id.identifier):
+                        container = LazyContainer(id=f"{msg_id.identifier}-container")
+                        container.widgets = tuple(
+                            self._compose_message_widgets(db.name, msg, is_tx=is_tx)
                         )
+                        yield container
         yield Footer()
+
+    @on(Collapsible.Toggled)
+    def on_message_collapsed(self, event: MessageCollapsible.Collapsed) -> None:
+        widget = self.query_one(f"#{event.collapsible.id}-container", LazyContainer)
+        if not widget.loaded:
+            widget.loaded = True
 
     def dispatch_new_messages_values(self, decoded_msg: DecodedMessage) -> None:
         """
@@ -1159,8 +1178,11 @@ class CanViewer(App[None]):
         changes the direction of signal widgets accordingly.
         """
         for signal_id, properties in self._signal_properties.items():
-            widget = self.query_one(signal_id.query_key, SignalWidget)
-
+            try:
+                widget = self.query_one(signal_id.query_key, SignalWidget)
+            except NoMatches:
+                # will happen before lazy loader is triggered
+                continue
             assert isinstance(widget, SignalWidget)
             is_tx = new_producer in properties.senders
             widget.is_tx = is_tx
