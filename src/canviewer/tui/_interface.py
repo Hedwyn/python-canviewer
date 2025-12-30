@@ -157,6 +157,43 @@ class MessageHistory:
         return statistics.mean(intervals)
 
 
+class MessageCollapsible(Collapsible):
+    """
+    The collapsible storing a message and its signals.
+    Provides a hiding button that allows removing the signal from the panel.
+    """
+
+    show_when_disabled: Reactive[bool] = reactive(False)
+
+    def watch_show_when_disabled(self, old_value: bool, new_value: bool) -> None:
+        if old_value is new_value:
+            return
+        # force a refresh
+        self._toggle()
+
+    @on(Switch.Changed)
+    def on_toggle_show(self, event: Switch.Changed) -> None:
+        self._toggle(event.value)
+
+    def _toggle(self, enabled: bool | None = None) -> None:
+        if enabled is None:
+            switch = self.query_one(Switch)
+            enabled = switch.value
+        if self.show_when_disabled:
+            self.visible = True
+        else:
+            self.visible = enabled
+        self._title.disabled = not enabled
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="message-header"):
+            yield self._title
+            with Horizontal(id="message-toggler"):
+                yield Switch(value=True)
+        with self.Contents():
+            yield from self._contents_list
+
+
 class MessageWidget(Container):
     """
     Shows statistics and basic controls for a given message.
@@ -799,6 +836,7 @@ class CanViewer(App[None]):
     builds a UI dynamically to control all signals from these databases.
     """
 
+    show_hidden_messages: Reactive[bool] = reactive(False)
     CSS_PATH: ClassVar[str] = str(TCSS_PATH)
 
     def __init__(
@@ -836,6 +874,12 @@ class CanViewer(App[None]):
         self.ensure_radioset_defaults()
         self._backend.add_message_callback(self.dispatch_new_messages_values)
         self._backend.start()
+
+    def watch_show_hidden_messages(self, old_value: bool, new_value: bool) -> None:
+        if old_value is new_value:
+            return
+        for msg_widget in self.query(MessageCollapsible):
+            msg_widget.show_when_disabled = new_value
 
     def get_selected_producer(self, database_name: str) -> str | None:
         """
@@ -909,6 +953,8 @@ class CanViewer(App[None]):
             )
             yield Label("Autosend")
             yield Switch(value=False, animate=True, id="enable_autosend")
+            yield Label("Show all")
+            yield Switch(value=False, animate=True, id="show_all")
 
     def compose(self) -> ComposeResult:
         """
@@ -926,7 +972,7 @@ class CanViewer(App[None]):
 
         def msg_collapsible() -> ContextManager:
             return (
-                Collapsible(title=msg.name)
+                MessageCollapsible(title=msg.name)
                 if self._config.collapse_messages
                 else contextlib.nullcontext()
             )
@@ -1027,6 +1073,8 @@ class CanViewer(App[None]):
     @on(Switch.Changed)
     def on_switch_toggled(self, event: Switch.Changed) -> None:
         match event.switch.id:
+            case "show_all":
+                self.show_hidden_messages = event.value
             case "enable_autosend":
                 self._config.autosend = event.value
             case "toggle_senders":
