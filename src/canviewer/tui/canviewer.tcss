@@ -24,3 +24,9 @@ Digits {
   align: center middle;
   color: $secondary;
 }
+#message-header{
+  height: 3;  
+}
+#message-toggler {
+  align: right middle;
+}
