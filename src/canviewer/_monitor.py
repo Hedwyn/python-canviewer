@@ -147,12 +147,16 @@ class DatabaseStore:
         """
         yield from self.databases
 
-    def find_message_and_db(self, message_name: str) -> tuple[CanFrame, NamedDatabase]:
+    def find_message_and_db(
+        self, message_name: str, db_name: str | None = None
+    ) -> tuple[CanFrame, NamedDatabase]:
         """
         Looks for message `message_name` in all registered databases
         and returns both the message and the database in which it's declared.
         """
         for db in self.databases:
+            if db_name is not None and db_name != db.name:
+                continue
             if (msg := db.get_message_by_name(message_name)) is not None:
                 return msg, db
         raise ValueError(
@@ -160,11 +164,11 @@ class DatabaseStore:
             "but not found in any DB"
         )
 
-    def find_message(self, message_name: str) -> CanFrame:
+    def find_message(self, message_name: str, db_name: str | None = None) -> CanFrame:
         """
         Looks for message `message_name` in all registered databases.
         """
-        return self.find_message_and_db(message_name)[0]
+        return self.find_message_and_db(message_name, db_name=db_name)[0]
 
     @classmethod
     def from_files(cls, *db_files: str) -> Self:
