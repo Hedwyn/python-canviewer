@@ -50,6 +50,7 @@ from textual.widgets import (
     RadioSet,
     Switch,
 )
+from textual.theme import Theme
 
 from canviewer._monitor import (
     CanFrame,
@@ -60,6 +61,12 @@ from canviewer._monitor import (
     NamedDatabase,
 )
 
+main_theme = Theme(
+    name="canviewer",
+    primary="cyan",
+    secondary="orange",
+    dark=True,
+)
 TCSS_PATH = Path(__file__).parent / "canviewer.tcss"
 
 HISTORY_REFRESH_PERIOD = (
@@ -157,15 +164,19 @@ class MessageStatsWidget(Container):
     def compose(self) -> ComposeResult:
         with Horizontal():
             if self.is_tx:
-                yield Button(label="Send")
-            yield Label(content="Count: ")
-            yield Digits(value=f"{self.count}")
-            if self.measured_period:
-                period_hint = (
-                    f"(expected: {self.period:.1f})" if self.period is not None else ""
-                )
-                yield Label(content=f"Period: {period_hint}")
-                yield Digits(value=f"{1000 * self.measured_period:.1f}")
+                with Horizontal(id="message-controls"):
+                    yield Button(label="Send")
+            with Horizontal(id="message-stats"):
+                yield Label(content="Count: ")
+                yield Digits(value=f"{self.count}")
+                if self.measured_period:
+                    period_hint = (
+                        f"(expected: {self.period:.1f})"
+                        if self.period is not None
+                        else ""
+                    )
+                    yield Label(content=f"Period: {period_hint}")
+                    yield Digits(value=f"{1000 * self.measured_period:.1f}")
 
 
 class SignalWidget(Container):
@@ -678,7 +689,7 @@ class CanViewer(App[None]):
     builds a UI dynamically to control all signals from these databases.
     """
 
-    CSS_PATH: ClassVar[str] = TCSS_PATH
+    CSS_PATH: ClassVar[str] = str(TCSS_PATH)
 
     def __init__(
         self,
@@ -709,6 +720,8 @@ class CanViewer(App[None]):
         """
         Starts the backend and tweaks widgets.
         """
+        self.register_theme(main_theme)
+        self.theme = "canviewer"
         self.call_after_refresh(self.ensure_radioset_defaults)
         self.ensure_radioset_defaults()
         self._backend.add_message_callback(self.dispatch_new_messages_values)
@@ -776,7 +789,7 @@ class CanViewer(App[None]):
         """
         Builds the main controls panel at the top of the UI
         """
-        with Horizontal():
+        with Horizontal(id="main-controls"):
             yield Label(content="Activate Senders")
             yield Switch(
                 value=False,
