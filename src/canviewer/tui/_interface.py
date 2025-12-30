@@ -109,6 +109,7 @@ class StopSender(Message):
 
 @dataclass
 class MessagePeriodChanged(Message):
+    message_id: MessageID
     period: float
 
 
@@ -173,12 +174,21 @@ class MessageStatsWidget(Container):
             self.count = history.count
             self.measured_period = history.estimated_period
 
-    @on(Input.Changed)
+    @on(Input.Submitted)
     def _on_period_changed(self, event: Input.Changed) -> None:
         assert self.is_tx, "Period input should only be available for TX messages"
-        new_period = 1000 * float(event.value)
-        _logger.info("Changing period to %f")
-        self.post_message(MessagePeriodChanged(new_period))
+        try:
+            new_period_ms = float(event.value)
+        except ValueError:
+            _logger.error("Non-float value received for period: %s", event.value)
+            return
+        new_period = new_period_ms / 1000
+        _logger.info("Changing period to %f s", new_period_ms)
+        self.period = new_period_ms
+        assert self.id is not None
+        self.post_message(
+            MessagePeriodChanged(MessageID.from_identifier(self.id), new_period)
+        )
 
     @on(Switch.Changed)
     def on_sender_enabled(self, event: Switch.Changed) -> None:
@@ -659,6 +669,9 @@ class Backend:
         )
         self.monitor.bus.send(payload)
 
+    def is_sender_active(self, msg: CanFrame) -> bool:
+        return msg in self._periodic_messages
+
     def start_periodic_message_task(
         self,
         msg: CanFrame,
@@ -674,8 +687,9 @@ class Backend:
         self,
         msg: CanFrame,
     ) -> None:
-        task = self._periodic_messages[msg]
-        task.cancel()
+        task = self._periodic_messages.get(msg)
+        if task is not None:
+            task.cancel()
 
     def start_senders(self, loop: AbstractEventLoop | None = None) -> None:
         """
@@ -727,7 +741,9 @@ class Backend:
         """
         Sends a given message at the given interval.
         """
-        interval = interval or frame.cycle_time
+        if interval is None:
+            assert frame.cycle_time is not None
+            interval = frame.cycle_time / 1000
         assert interval is not None, (
             "Cannot send a message without specifying an interval"
         )
@@ -739,7 +755,7 @@ class Backend:
                 )
                 _logger.info("Sending %s, next is %f", payload, interval)
                 self.monitor.bus.send(payload)
-                await asyncio.sleep(interval / 1000)
+                await asyncio.sleep(interval)
         except Exception:
             _logger.error("Periodic sender failed", exc_info=True)
 
@@ -978,6 +994,20 @@ class CanViewer(App[None]):
             msg_id.message, msg_id.db_name
         )
         self._backend.stop_periodic_message_task(frame)
+
+    @on(MessagePeriodChanged)
+    def on_message_period_changed(self, event: MessagePeriodChanged) -> None:
+        _logger.info("Message period changed %s", event)
+        # TODO: move this logic to backend
+        msg_id = event.message_id
+        frame = self._backend.database_store.find_message(
+            msg_id.message, msg_id.db_name
+        )
+        if not self._backend.is_sender_active(frame):
+            return
+        _logger.info("Restarting sender for msg %s", msg_id.identifier)
+        self._backend.stop_periodic_message_task(frame)
+        self._backend.start_periodic_message_task(frame, event.period)
 
     @on(Switch.Changed)
     def on_switch_toggled(self, event: Switch.Changed) -> None:
