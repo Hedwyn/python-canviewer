@@ -281,16 +281,12 @@ class MessageWidget(Container):
         try:
             sender_toggle = self.query_one("#toggle-sender", Switch)
         except NoMatches:
-            assert not self.is_tx, (
-                "Message widget should have a sender toggler in TX mode"
-            )
             return
         with sender_toggle.prevent(Switch.Changed):
             sender_toggle.value = value
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            # direction_hint_arrow = "⇇" if self.is_tx else "⇉"
             direction_hint_arrow = RIGHT_ARROW if self.is_tx else LEFT_ARROW
             yield Label(content=direction_hint_arrow, id="direction")
             if self.is_tx:
@@ -392,12 +388,19 @@ class SignalWidget(Container):
 @dataclass
 class TUIConfig:
     """
-     Main config dataclass for the TUI itself.
-     Allows configuring the way the TUI is laid out and rendered.
+    WARNING: this docstring is parsed to generate the fields documentation
+    in the app, mind the format.
 
-     Parameters
-     ----------
-     collapse_database
+    Main config dataclass for the TUI itself.
+    Allows configuring the way the TUI is laid out and rendered.
+
+    Parameters
+    ----------
+    persistent
+        Whether the application should generate and manage
+        persistent data in the user's home folder.
+
+    collapse_database
          Wraps each database in a collapsible
          (collapsed on startup).
 
@@ -409,9 +412,29 @@ class TUIConfig:
         Whether to resend values automatically when signals are edited.
     """
 
+    persistent: bool = False
     collapse_database: bool = False
     collapse_messages: bool = True
     autosend: bool = False
+
+    @classmethod
+    def parse_docstring(cls) -> dict[str, str]:
+        assert cls.__doc__ is not None
+        _logger.info("%s", cls.__doc__)
+        tab = "    "
+        parameters = cls.__doc__.split("----------")[1]
+        lines: list[str] = []
+        docstrings: dict[str, str] = {}
+        current_param: str | None = None
+        for line in parameters.split("\n"):
+            if not line.startswith(2 * tab):
+                if current_param:
+                    docstrings[current_param] = "\n".join(lines)
+                    lines.clear()
+                current_param = line.strip()
+            else:
+                lines.append(line.replace(2 * tab, ""))
+        return docstrings
 
 
 @dataclass(frozen=True, eq=True)
@@ -1024,6 +1047,7 @@ class CanViewer(App[None]):
         yield Footer()
 
     def compose_config_tab(self) -> ComposeResult:
+        doc = self._config.parse_docstring()
         for f in fields(TUIConfig):
             yield Label(content=f.name)
             with Horizontal():
@@ -1032,6 +1056,7 @@ class CanViewer(App[None]):
                     yield Switch(id=config_id)
                 else:
                     yield Input(id=config_id)
+                yield Label(doc[f.name])
 
     def compose_databases_tab(self) -> ComposeResult:
         yield DataTable(id="databases")
