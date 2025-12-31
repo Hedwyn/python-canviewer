@@ -414,9 +414,6 @@ class TUIConfig:
          Wraps each database in a collapsible
          (collapsed on startup).
 
-    collapse_messages
-         Wraps each message in a collapsible
-         (collapsed on startup).
 
     autosend
         Whether to resend values automatically when signals are edited.
@@ -424,7 +421,6 @@ class TUIConfig:
 
     persistent: bool = False
     collapse_database: bool = False
-    collapse_messages: bool = True
     autosend: bool = False
 
     @classmethod
@@ -1100,13 +1096,6 @@ class CanViewer(App[None]):
                 else contextlib.nullcontext()
             )
 
-        def msg_collapsible(id: str | None = None) -> ContextManager:
-            return (
-                MessageCollapsible(title=msg.name, id=id)
-                if self._config.collapse_messages
-                else contextlib.nullcontext()
-            )
-
         for db in self._backend.database_store:
             # showing nodes
             default_node: str | None = None
@@ -1131,7 +1120,9 @@ class CanViewer(App[None]):
                         is_tx,
                     )
                     msg_id = MessageID(db.name, msg.name)
-                    with msg_collapsible(id=msg_id.identifier):
+                    with MessageCollapsible(
+                        title=msg.name, id=f"{msg_id.identifier}-collapsible"
+                    ):
                         container = LazyContainer(id=f"{msg_id.identifier}-container")
                         container.widgets = tuple(
                             self._compose_message_widgets(db.name, msg, is_tx=is_tx)
@@ -1140,7 +1131,9 @@ class CanViewer(App[None]):
 
     @on(Collapsible.Toggled)
     def on_message_collapsed(self, event: MessageCollapsible.Collapsed) -> None:
-        widget = self.query_one(f"#{event.collapsible.id}-container", LazyContainer)
+        assert event.collapsible.id is not None
+        container_id = event.collapsible.id.replace("-collapsible", "-container")
+        widget = self.query_one(f"#{container_id}", LazyContainer)
         if not widget.loaded:
             widget.loaded = True
 
