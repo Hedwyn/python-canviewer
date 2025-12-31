@@ -11,11 +11,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from os import path
 import statistics
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from functools import cache, cached_property
 from pathlib import Path
 from typing import (
@@ -30,7 +29,6 @@ from typing import (
 
 import can
 from cantools.database.can.signal import Signal
-from cantools.database.diagnostics import database
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Ok
 
@@ -46,6 +44,7 @@ from textual.widget import Widget
 from textual.widgets import (
     Button,
     Collapsible,
+    DataTable,
     Digits,
     Footer,
     Header,
@@ -57,7 +56,6 @@ from textual.widgets import (
     Switch,
     TabbedContent,
     TabPane,
-    DataTable,
 )
 from textual_slider import Slider
 
@@ -1021,7 +1019,19 @@ class CanViewer(App[None]):
                 yield from self.compose_monitor_tab()
             with TabPane("Databases"):
                 yield from self.compose_databases_tab()
+            with TabPane("Config"):
+                yield from self.compose_config_tab()
         yield Footer()
+
+    def compose_config_tab(self) -> ComposeResult:
+        for f in fields(TUIConfig):
+            yield Label(content=f.name)
+            with Horizontal():
+                config_id = f"config-{f.name}"
+                if f.type == "bool":
+                    yield Switch(id=config_id)
+                else:
+                    yield Input(id=config_id)
 
     def compose_databases_tab(self) -> ComposeResult:
         yield DataTable(id="databases")
@@ -1092,7 +1102,6 @@ class CanViewer(App[None]):
                             self._compose_message_widgets(db.name, msg, is_tx=is_tx)
                         )
                         yield container
-        # yield Footer()
 
     @on(Collapsible.Toggled)
     def on_message_collapsed(self, event: MessageCollapsible.Collapsed) -> None:
@@ -1166,7 +1175,15 @@ class CanViewer(App[None]):
 
     @on(Switch.Changed)
     def on_switch_toggled(self, event: Switch.Changed) -> None:
-        match event.switch.id:
+        switch_id = event.switch.id
+
+        if switch_id is not None and switch_id.startswith("config-"):
+            config_param = switch_id.replace("config-", "")
+            setattr(self._config, config_param, event.value)
+            _logger.info("Setting %s to %s", config_param, event.value)
+            return
+
+        match switch_id:
             case "show_all":
                 self.show_hidden_messages = event.value
             case "enable_autosend":
