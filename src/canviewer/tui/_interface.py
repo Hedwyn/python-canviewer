@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import statistics
 import time
@@ -67,6 +68,7 @@ from canviewer._monitor import (
     DecodedMessage,
     NamedDatabase,
 )
+from canviewer._persistency import get_config_path
 
 main_theme = Theme(
     name="canviewer",
@@ -86,6 +88,14 @@ if TYPE_CHECKING:
     from textual.driver import Driver
 
 _logger = logging.getLogger(__name__)
+
+
+def save_config(config: TUIConfig, path: Path | None = None) -> None:
+    """
+    Saves the config to the persistent data folder.
+    """
+    path = path or get_config_path(ensure_persistent_folder_exists=True)
+    path.write_text(json.dumps(asdict(config), indent=4))
 
 
 type JsonLike = dict[str, int | str | float | None | JsonLike]
@@ -1206,6 +1216,8 @@ class CanViewer(App[None]):
             config_param = switch_id.replace("config-", "")
             setattr(self._config, config_param, event.value)
             _logger.info("Setting %s to %s", config_param, event.value)
+            if self._config.persistent:
+                save_config(self._config)
             return
 
         match switch_id:
