@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from os import path
 import statistics
 import time
 from collections import deque
@@ -29,6 +30,7 @@ from typing import (
 
 import can
 from cantools.database.can.signal import Signal
+from cantools.database.diagnostics import database
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Ok
 
@@ -53,6 +55,9 @@ from textual.widgets import (
     RadioSet,
     Select,
     Switch,
+    TabbedContent,
+    TabPane,
+    DataTable,
 )
 from textual_slider import Slider
 
@@ -924,6 +929,7 @@ class CanViewer(App[None]):
         self.theme = "canviewer"
         self.call_after_refresh(self.ensure_radioset_defaults)
         self.ensure_radioset_defaults()
+        self.populate_databases()
         self._backend.add_message_callback(self.dispatch_new_messages_values)
         self._backend.start()
 
@@ -1009,10 +1015,35 @@ class CanViewer(App[None]):
             yield Switch(value=False, animate=True, id="show_all")
 
     def compose(self) -> ComposeResult:
+        yield Header()
+        with TabbedContent():
+            with TabPane("Monitor"):
+                yield from self.compose_monitor_tab()
+            with TabPane("Databases"):
+                yield from self.compose_databases_tab()
+        yield Footer()
+
+    def compose_databases_tab(self) -> ComposeResult:
+        yield DataTable(id="databases")
+
+    def populate_databases(self) -> None:
+        """
+        Populates the rows ans columns for the database table
+        in the database tab.
+        """
+        rows: list[tuple[str, str]] = []
+        for db in self._backend.database_store.databases:
+            db_path = db.path.stem if db.path else "-"
+            rows.append((db.name, db_path))
+
+        databases = self.query_one("#databases", DataTable)
+        databases.add_columns("Name", "Path")
+        databases.add_rows(rows)
+
+    def compose_monitor_tab(self) -> ComposeResult:
         """
         Builds the main UI layout.
         """
-        yield Header()
         yield from self._compose_main_controls_panel()
 
         def db_collapsible() -> ContextManager:
@@ -1059,7 +1090,7 @@ class CanViewer(App[None]):
                             self._compose_message_widgets(db.name, msg, is_tx=is_tx)
                         )
                         yield container
-        yield Footer()
+        # yield Footer()
 
     @on(Collapsible.Toggled)
     def on_message_collapsed(self, event: MessageCollapsible.Collapsed) -> None:
