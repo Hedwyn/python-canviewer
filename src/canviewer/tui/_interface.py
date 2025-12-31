@@ -1031,13 +1031,15 @@ class CanViewer(App[None]):
         Populates the rows ans columns for the database table
         in the database tab.
         """
-        rows: list[tuple[str, str]] = []
+        rows: list[tuple[str, str, str, str]] = []
         for db in self._backend.database_store.databases:
             db_path = db.path.stem if db.path else "-"
-            rows.append((db.name, db_path))
+            total_messages = str(len(db.messages))
+            nodes = ",".join(db.nodes)
+            rows.append((db.name, db_path, total_messages, nodes))
 
         databases = self.query_one("#databases", DataTable)
-        databases.add_columns("Name", "Path")
+        databases.add_columns("Name", "Path", "Messages", "Nodes")
         databases.add_rows(rows)
 
     def compose_monitor_tab(self) -> ComposeResult:
