@@ -86,6 +86,7 @@ class NamedDatabase:
 
     name: str
     database: CanDatabase
+    path: Path | None = None
 
     @property
     def nodes(self) -> list[str]:
@@ -116,16 +117,17 @@ class NamedDatabase:
             return None
 
     @classmethod
-    def load_from_file(cls, path: str | Path) -> Self:
+    def load_from_file(cls, path: str | Path, name: str | None = None) -> Self:
         """
         Loads the database from the given `path`.
         """
-        name = Path(path).stem
+        name = name or Path(path).stem
         loaded_db = cantools.database.load_file(path)
         assert isinstance(loaded_db, CanDatabase)
         return cls(
             name=name,
             database=loaded_db,
+            path=Path(path),
         )
 
 
