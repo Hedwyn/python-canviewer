@@ -30,3 +30,19 @@ Digits {
 #message-toggler {
   align: right middle;
 }
+
+#lazy-container {
+  height: auto;
+}
+
+LazyContainer {
+  height: auto;
+}
+
+MessageWidget {
+  height: 3;
+}
+
+SignalWidget {
+  height: 3;
+}
