@@ -216,7 +216,7 @@ class LazyContainer(Container):
     loaded: Reactive[bool] = reactive(False, recompose=True)
 
     def compose(self):
-        with Vertical():
+        with Vertical(id="lazy-container"):
             if self.loaded:
                 yield from self.widgets
 
