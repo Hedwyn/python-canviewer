@@ -231,7 +231,7 @@ def get_platform_default_channel() -> Result[str, UnsupportedSystem]:
     match local_system:
         case "Windows":
             return Ok("PCAN_USBBUS1")
-        case "Linux":
+        case "Linux" | "Darwin":
             return Ok("can0")
         case _:
             return Err(UnsupportedSystem(local_system))
@@ -249,7 +249,7 @@ def get_platform_default_driver() -> Result[str, UnsupportedSystem]:
     match local_system:
         case "Windows":
             return Ok("pcan")
-        case "Linux":
+        case "Linux" | "Darwin":
             return Ok("socketcan")
         case _:
             return Err(UnsupportedSystem(local_system))
