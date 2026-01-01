@@ -6,7 +6,7 @@
 }
 #message-controls {
     height: 3;
-    background: $panel;
+    background: $surface;
 }
 #message-stats{
     height: 3;
@@ -14,7 +14,7 @@
     background: $panel;
 }
 Digits {
-    background: $surface;
+    background: $panel;
     color: $primary;
     width: 10%;
 }
@@ -45,4 +45,8 @@ MessageWidget {
 
 SignalWidget {
   height: 3;
+}
+
+#message-banner {
+  background: $surface;
 }

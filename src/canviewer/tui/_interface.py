@@ -181,6 +181,7 @@ class MessageCollapsible(Collapsible):
     """
 
     show_when_disabled: Reactive[bool] = reactive(False)
+    is_tx: Reactive[bool] = reactive(True, recompose=True)
 
     def watch_show_when_disabled(self, old_value: bool, new_value: bool) -> None:
         if old_value is new_value:
@@ -205,6 +206,8 @@ class MessageCollapsible(Collapsible):
     def compose(self) -> ComposeResult:
         with Horizontal(id="message-header"):
             yield self._title
+            direction_hint = "⇉" if not self.is_tx else "⇇"
+            yield Label(content=direction_hint, id="direction")
             with Horizontal(id="message-toggler"):
                 yield Switch(value=True)
         with self.Contents():
@@ -296,9 +299,7 @@ class MessageWidget(Container):
             sender_toggle.value = value
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            direction_hint_arrow = RIGHT_ARROW if self.is_tx else LEFT_ARROW
-            yield Label(content=direction_hint_arrow, id="direction")
+        with Horizontal(id="message-banner"):
             if self.is_tx:
                 with Horizontal(id="message-controls"):
                     if self.period is not None:
@@ -1258,13 +1259,22 @@ class CanViewer(App[None]):
         changes the direction of signal widgets accordingly.
         """
         for signal_id, properties in self._signal_properties.items():
+            is_tx = new_producer in properties.senders
+            msg_collapsible = self.query_one(
+                f"#{signal_id.get_message_id().identifier}-collapsible",
+                MessageCollapsible,
+            )
+            if msg_collapsible.is_tx != is_tx:
+                msg_collapsible.is_tx = is_tx
+            # Signals and message widgets are produced lazily,
+            # so they might not be loaded yet.
+            # early return in that case
             try:
                 widget = self.query_one(signal_id.query_key, SignalWidget)
             except NoMatches:
                 # will happen before lazy loader is triggered
                 continue
             assert isinstance(widget, SignalWidget)
-            is_tx = new_producer in properties.senders
             widget.is_tx = is_tx
             msg_widget = self.query_one(
                 signal_id.get_message_id().query_key, MessageWidget
