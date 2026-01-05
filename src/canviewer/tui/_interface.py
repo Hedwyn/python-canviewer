@@ -14,6 +14,7 @@ import json
 import logging
 from operator import add
 import statistics
+from sys import float_repr_style
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
@@ -61,7 +62,7 @@ from textual.widgets import (
     TabPane,
     DirectoryTree,
 )
-from textual_slider import Slider
+from ._slider import Slider
 
 from canviewer._monitor import (
     CanFrame,
@@ -369,24 +370,43 @@ class SignalWidget(Container):
         input.value = str(event.value)
 
     def get_value_widget(self) -> Iterator[Widget]:
+        properties = self.properties
         value = self.current_value
-        formatted_value = hex(value) if isinstance(value, int) else str(value)
+        is_int = (
+            properties.signal_type is int
+            if properties is not None
+            else isinstance(value, int)
+        )
+        if is_int:
+            assert isinstance(value, int)
+            formatted_value = hex(value)
+        else:
+            formatted_value = str(value)
         if not self.is_tx:
             yield Label(content=formatted_value)
             return
-        properties = self.properties
         if properties and properties.choices:
             options = [(str(choice), choice) for choice in properties.choices]
             yield Select(options=options, value=options[0][1], prompt="Choose Value")
             return
 
-        if properties and not properties.is_float():
-            assert isinstance(self.current_value, int)
-            yield Slider(
-                min=int(properties.min_value or 0),
-                max=int(properties.max_value or 0),
-                value=int(self.current_value),
-            )
+        # if properties and not properties.is_float():
+        if properties:
+            if properties.is_float():
+                assert isinstance(value, (int, float))
+                yield Slider(
+                    min=properties.min_value or 0,
+                    max=properties.max_value or 0,
+                    value=value,
+                    value_type=float,
+                )
+            else:
+                assert isinstance(self.current_value, int)
+                yield Slider(
+                    min=int(properties.min_value or 0),
+                    max=int(properties.max_value or 0),
+                    value=int(self.current_value),
+                )
         yield Input(value=formatted_value, id="value-input")
 
     def compose(self) -> ComposeResult:
@@ -582,7 +602,11 @@ def _get_sound_minimum(signal: Signal) -> float | None:
     if not signal.is_signed:
         return 0
     exponent = signal.length - 1
-    return -(2**exponent)
+    min_val = -(2**exponent)
+    if signal.conversion:
+        min_val *= signal.conversion.scale
+        min_val += signal.conversion.offset
+    return min_val
 
 
 def _get_sound_maximum(signal: Signal) -> float | None:
@@ -598,7 +622,11 @@ def _get_sound_maximum(signal: Signal) -> float | None:
     exponent = signal.length
     if signal.is_signed:
         exponent -= 1
-    return (2**exponent) - 1
+    max_val = (2**exponent) - 1
+    if signal.conversion:
+        max_val *= signal.conversion.scale
+        max_val += signal.conversion.offset
+    return max_val
 
 
 @dataclass
