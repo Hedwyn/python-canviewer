@@ -12,9 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from operator import add
 import statistics
-from sys import float_repr_style
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
@@ -50,6 +48,7 @@ from textual.widgets import (
     Collapsible,
     DataTable,
     Digits,
+    DirectoryTree,
     Footer,
     Header,
     Input,
@@ -60,9 +59,7 @@ from textual.widgets import (
     Switch,
     TabbedContent,
     TabPane,
-    DirectoryTree,
 )
-from ._slider import Slider
 
 from canviewer._monitor import (
     CanFrame,
@@ -72,7 +69,9 @@ from canviewer._monitor import (
     DecodedMessage,
     NamedDatabase,
 )
-from canviewer._persistency import get_config_path, add_database
+from canviewer._persistency import add_database, get_config_path
+
+from ._slider import Slider
 
 main_theme = Theme(
     name="canviewer",
@@ -103,18 +102,6 @@ def save_config(config: TUIConfig, path: Path | None = None) -> None:
 
 
 type JsonLike = dict[str, int | str | float | None | JsonLike]
-
-RIGHT_ARROW = """\
-← 
-← 
-← 
-"""
-
-LEFT_ARROW = """\
-→ 
-→ 
-→ 
-"""
 
 
 @dataclass
@@ -360,7 +347,7 @@ class SignalWidget(Container):
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
         _logger.info("SignalWidget Input changed: %s %s", event, event.input)
         self.post_message(SignalValueEdited(widget=self, value=event.value))
-        if self.properties and not self.properties.is_float():
+        if self.properties:
             slider = self.query_one(Slider)
             slider.value = int(event.value)
 
