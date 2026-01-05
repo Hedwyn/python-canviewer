@@ -50,3 +50,6 @@ SignalWidget {
 #message-banner {
   background: $surface;
 }
+#databases-loader-controls {
+  height: auto;
+}
