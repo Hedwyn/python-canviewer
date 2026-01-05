@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from operator import add
 import statistics
 import time
 from collections import deque
@@ -70,7 +71,7 @@ from canviewer._monitor import (
     DecodedMessage,
     NamedDatabase,
 )
-from canviewer._persistency import get_config_path
+from canviewer._persistency import get_config_path, add_database
 
 main_theme = Theme(
     name="canviewer",
@@ -1104,9 +1105,12 @@ class CanViewer(App[None]):
                 yield Label(doc[f.name])
 
     def compose_databases_tab(self) -> ComposeResult:
-        yield DirectoryTree(path=Path.home())
-        yield Button("Load")
         yield DataTable(id="databases")
+        with Collapsible(title="Load database", id="database-collapsible"):
+            with Horizontal(id="databases-loader-controls"):
+                yield Button(".", id="cwd")
+                yield Button("Load", id="load-database-from-file")
+            yield DirectoryTree(path=Path.home())
 
     def populate_databases(self) -> None:
         """
@@ -1143,7 +1147,7 @@ class CanViewer(App[None]):
             default_node: str | None = None
             if db.nodes:
                 default_node = db.nodes[0]
-                yield Label(content="Producer")
+                yield Label(content=f"Producer ({db.name})")
                 radio_set_id = f"{db.name}-producer"
                 radio_set = RadioSet(*db.nodes, id=radio_set_id)
                 yield radio_set
@@ -1172,6 +1176,11 @@ class CanViewer(App[None]):
                         yield container
 
     @on(Collapsible.Toggled)
+    def on_any_collapse(self, event: MessageCollapsible.Collapsed) -> None:
+        if event.collapsible.id == "database-collapsible":
+            return
+        self.on_message_collapsed(event)
+
     def on_message_collapsed(self, event: MessageCollapsible.Collapsed) -> None:
         assert event.collapsible.id is not None
         container_id = event.collapsible.id.replace("-collapsible", "-container")
@@ -1200,19 +1209,24 @@ class CanViewer(App[None]):
             widget = self.query_one(signal_id.query_key, SignalWidget)
             widget.update_value(value)
 
-    def _load_database(self, path: Path) -> None:
+    def _load_database(self, path_or_db: Path | NamedDatabase) -> None:
         """
         Loads the database at `path` into the GUI.
         """
-        try:
-            new_db = self._backend.database_store.load_database_from_file(path)
-        except Exception:
-            _logger.error("Failed to load database", exc_info=True)
-            return
+        if isinstance(path_or_db, Path):
+            try:
+                db = self._backend.database_store.load_database_from_file(path_or_db)
+                if self._config.persistent:
+                    add_database(db)
+            except Exception:
+                _logger.error("Failed to load database", exc_info=True)
+                return
+        else:
+            db = path_or_db
         loaded_dbs = list(self.loaded_databases)
-        loaded_dbs.append(new_db)
+        loaded_dbs.append(db)
         self.loaded_databases = tuple(loaded_dbs)
-        _logger.info("Loaded %s", new_db)
+        _logger.info("Loaded %s", db)
 
     # --- Handlers on signal widgets interactions --- #
     @on(DirectoryTree.FileSelected)
@@ -1314,6 +1328,22 @@ class CanViewer(App[None]):
         self.change_message_direction(new_producer)
 
     @on(Button.Pressed)
+    def on_any_button_pressed(self, event: Button.Pressed) -> None:
+        match event.button.id:
+            case "cwd":
+                tree = self.query_one(DirectoryTree)
+                tree.path = "."
+            case "load-database-from-file":
+                self.on_database_load()
+            case "load-database":
+                db_selector = self.query_one("#database-selection", Select)
+                db_name = db_selector.value
+                assert isinstance(db_name, str)
+                db = self._backend.database_store.get_database(db_name)
+                assert db is not None, "database name present in select but not loaded"
+                self._load_database(db)
+                pass
+
     def on_database_load(self) -> None:
         if self._selected_file is None:
             _logger.info("Load database pressed but no file selected, skipping")
