@@ -23,6 +23,7 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
+    Iterable,
     Iterator,
     NamedTuple,
     Self,
@@ -923,12 +924,16 @@ class CanViewer(App[None]):
 
     show_hidden_messages: Reactive[bool] = reactive(False)
     CSS_PATH: ClassVar[str] = str(TCSS_PATH)
+    loaded_databases: Reactive[tuple[NamedDatabase, ...]] = reactive(
+        tuple, recompose=True
+    )
 
     def __init__(
         self,
         backend: Backend,
         dispatcher: WidgetDispatcher | None = None,
         config: TUIConfig | None = None,
+        preload_databases: Iterable[str] | None = None,
         driver_class: type[Driver] | None = None,
         css_path: CSSPathType | None = None,
         watch_css: bool = False,
@@ -948,6 +953,29 @@ class CanViewer(App[None]):
         self._message_stats: dict[
             MessageID, MessageHistory
         ] = {}  # maps each SignalWidget ID to its properties
+        self._preloaded_databases = list(preload_databases) if preload_databases else []
+        self.preload_databases()
+
+    def preload_databases(self) -> None:
+        _logger.info("Preloading databases %s...", self._preloaded_databases)
+        loaded_databases = set(self.loaded_databases)
+        added: bool = False
+        for db_name in self._preloaded_databases:
+            db = self._backend.database_store.get_database(db_name)
+            _logger.info("found db %s", db)
+            if db is None:
+                _logger.error(
+                    "Asked to preload %s, but %s is not declared in the database store",
+                    db_name,
+                    db_name,
+                )
+                continue
+            added = True
+            loaded_databases.add(db)
+            _logger.info("Loading %s...", db.name)
+
+        if added:
+            self.loaded_databases = tuple(loaded_databases)
 
     def on_mount(self) -> None:
         """
@@ -1030,7 +1058,15 @@ class CanViewer(App[None]):
         """
         Builds the main controls panel at the top of the UI
         """
+        db_options = [(r.name, r.name) for r in self._backend.database_store.databases]
+        db_select_value = db_options[0][1] if db_options else None
         with Horizontal(id="main-controls"):
+            if db_options:
+                yield Label("Databases")
+                yield Select(
+                    id="database-selection", options=db_options, value=db_select_value
+                )
+                yield Button(label="Load", id="load-database")
             yield Label(content="Activate Senders")
             yield Switch(
                 value=False,
@@ -1097,7 +1133,8 @@ class CanViewer(App[None]):
                 else contextlib.nullcontext()
             )
 
-        for db in self._backend.database_store:
+        for db in self.loaded_databases:
+            # for db in self._backend.database_store:
             # showing nodes
             default_node: str | None = None
             if db.nodes:

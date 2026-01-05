@@ -88,6 +88,9 @@ class NamedDatabase:
     database: CanDatabase
     path: Path | None = None
 
+    def __hash__(self) -> int:
+        return hash((self.name, self.path))
+
     @property
     def nodes(self) -> list[str]:
         """
@@ -148,6 +151,12 @@ class DatabaseStore:
             All the stored databases.
         """
         yield from self.databases
+
+    def get_database(self, name: str) -> NamedDatabase | None:
+        for db in self.databases:
+            if db.name == name:
+                return db
+        return None
 
     def find_message_and_db(
         self, message_name: str, db_name: str | None = None
