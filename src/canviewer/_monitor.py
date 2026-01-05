@@ -158,6 +158,17 @@ class DatabaseStore:
                 return db
         return None
 
+    def load_database_from_file(
+        self, path: Path, name: str | None = None
+    ) -> NamedDatabase:
+        """
+        Adds the database at the given `path`, with the given `name`
+        Returns the loaded database.
+        """
+        new_db = NamedDatabase.load_from_file(path, name=name)
+        self.databases.append(new_db)
+        return new_db
+
     def find_message_and_db(
         self, message_name: str, db_name: str | None = None
     ) -> tuple[CanFrame, NamedDatabase]:
