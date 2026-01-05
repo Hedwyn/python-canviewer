@@ -58,6 +58,7 @@ from textual.widgets import (
     Switch,
     TabbedContent,
     TabPane,
+    DirectoryTree,
 )
 from textual_slider import Slider
 
@@ -954,6 +955,7 @@ class CanViewer(App[None]):
             MessageID, MessageHistory
         ] = {}  # maps each SignalWidget ID to its properties
         self._preloaded_databases = list(preload_databases) if preload_databases else []
+        self._selected_file: Path | None = None
         self.preload_databases()
 
     def preload_databases(self) -> None:
@@ -1102,6 +1104,8 @@ class CanViewer(App[None]):
                 yield Label(doc[f.name])
 
     def compose_databases_tab(self) -> ComposeResult:
+        yield DirectoryTree(path=Path.home())
+        yield Button("Load")
         yield DataTable(id="databases")
 
     def populate_databases(self) -> None:
@@ -1196,7 +1200,26 @@ class CanViewer(App[None]):
             widget = self.query_one(signal_id.query_key, SignalWidget)
             widget.update_value(value)
 
+    def _load_database(self, path: Path) -> None:
+        """
+        Loads the database at `path` into the GUI.
+        """
+        try:
+            new_db = self._backend.database_store.load_database_from_file(path)
+        except Exception:
+            _logger.error("Failed to load database", exc_info=True)
+            return
+        loaded_dbs = list(self.loaded_databases)
+        loaded_dbs.append(new_db)
+        self.loaded_databases = tuple(loaded_dbs)
+        _logger.info("Loaded %s", new_db)
+
     # --- Handlers on signal widgets interactions --- #
+    @on(DirectoryTree.FileSelected)
+    def on_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self._selected_file = event.path
+        # TODO: validate extension and enable/disable load button accordingly ?
+
     @on(SignalValueChanged)
     def on_signal_value_changed(self, event: SignalValueChanged) -> None:
         _logger.info(
@@ -1289,6 +1312,13 @@ class CanViewer(App[None]):
         new_producer = str(event.pressed.label)
         _logger.info("Producer changed for %s: %s", name, new_producer)
         self.change_message_direction(new_producer)
+
+    @on(Button.Pressed)
+    def on_database_load(self) -> None:
+        if self._selected_file is None:
+            _logger.info("Load database pressed but no file selected, skipping")
+            return
+        self._load_database(self._selected_file)
 
     def change_message_direction(self, new_producer: str) -> None:
         """
