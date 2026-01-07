@@ -154,6 +154,7 @@ class CanMonitor:
         loop: asyncio.AbstractEventLoop | None = None,
         mask: int = 0xFFFF_FFFF,
         id_pattern: CanIdPattern | int | None = None,
+        always_show_value: bool = False,
     ) -> None:
         self._loop = loop or asyncio.get_event_loop()
         self._queue: Queue[Result[DecodedMessage, UnknownMessage]] = Queue()
@@ -170,6 +171,7 @@ class CanMonitor:
             )
         else:
             self._id_pattern = None
+        self._always_show_value = always_show_value
 
     @property
     def queue(self) -> Queue:
@@ -215,7 +217,9 @@ class CanMonitor:
         for db in self._dbs:
             try:
                 frame = db.get_message_by_frame_id(candidate_id)
-                decoded_data = frame.decode(msg.data)  # type: ignore[assignment]
+                decoded_data = frame.decode(
+                    msg.data, decode_choices=not self._always_show_value
+                )  # type: ignore[assignment]
                 # Have to cast because cantools does not provide necessary overloads
                 # for decode -> when decode_containers is False, returned type is dict
                 decoded_data = cast(MessageDict, decoded_data)

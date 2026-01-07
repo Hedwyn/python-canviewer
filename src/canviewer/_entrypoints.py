@@ -140,6 +140,7 @@ async def _canviewer(
     snapshot_type: Literal["csv", "json"] = "csv",
     mask: int = 0xFFFF_FFFF,
     id_pattern: CanIdPattern | int | None = None,
+    always_show_value: bool = False,
 ) -> None:
     """
     Main asynchronous runner for the console application.
@@ -199,7 +200,13 @@ async def _canviewer(
             # registering commands
             interface.dispatcher[UserCommands.TAKE_SNAPSHOT] = on_snapshot
             loop.add_reader(sys.stdin, interface.on_input, sys.stdin)
-            backend = CanMonitor(bus, *databases, mask=mask, id_pattern=id_pattern)
+            backend = CanMonitor(
+                bus,
+                *databases,
+                mask=mask,
+                id_pattern=id_pattern,
+                always_show_value=always_show_value,
+            )
             try:
                 while True:  # Ctrl + C to leave
                     message = await backend.queue.get()
@@ -364,6 +371,12 @@ def collect_databases(*paths: str) -> Iterator[str]:
     default=None,
     help="Filter in all the messages following that pattern",
 )
+@click.option(
+    "-asv",
+    "--always-show-value",
+    is_flag=True,
+    help="Shows the value instead of the name for signals using named values",
+)
 def canviewer(
     channel: str | None,
     driver: str | None,
@@ -377,6 +390,7 @@ def canviewer(
     snapshot_format: Literal["json", "csv"],
     mask: str,
     pattern: str | None,
+    always_show_value: bool,
 ) -> None:
     """
     For every CAN ID found on the CAN bus,
@@ -426,6 +440,7 @@ def canviewer(
             snapshot_type=snapshot_format,
             id_pattern=id_pattern,
             mask=int(mask, 16),
+            always_show_value=always_show_value,
         )
     )
 
