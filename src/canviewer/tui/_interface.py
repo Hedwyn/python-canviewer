@@ -39,6 +39,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.events import Compose
 from textual.message import Message
 from textual.reactive import Reactive, reactive, var
 from textual.theme import Theme
@@ -108,6 +109,17 @@ type JsonLike = dict[str, int | str | float | None | JsonLike]
 class SignalValueEdited(Message):
     widget: SignalWidget
     value: int | str | float
+
+
+@dataclass
+class UpdateSignalMonitoringStatus(Message):
+    """
+    Indicates that the monitoring status of signal has changed.
+    A signal is `monitored` if its widget should be shown in the monitoring tab.
+    """
+
+    signal_widget: SignalWidget
+    monitored: bool = False
 
 
 @dataclass
@@ -329,6 +341,7 @@ class SignalWidget(Container):
     label: Reactive[str] = reactive("", recompose=True)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
     current_value: Reactive[CanTypes] = reactive("0", recompose=True)
+    is_monitored: Reactive[bool] = var(False)
 
     @cached_property
     def history(self) -> SignalHistory:
@@ -342,6 +355,15 @@ class SignalWidget(Container):
         history = self.history
         self.current_value = value
         history.values.append(value)
+
+    @on(Button.Pressed)
+    def on_monitoring_toggle(self, event: Button.Pressed) -> None:
+        button = event.button
+        is_monitored = not (self.is_monitored)
+        self.is_monitored = is_monitored
+        # Note: using 'success' variant to represent being ON
+        button.variant = "success" if is_monitored else "default"
+        self.post_message(UpdateSignalMonitoringStatus(self, is_monitored))
 
     @on(Input.Submitted)
     def on_signal_value_edited(self, event: Input.Submitted) -> None:
@@ -394,6 +416,7 @@ class SignalWidget(Container):
                     max=int(properties.max_value or 0),
                     value=int(self.current_value),
                 )
+        yield Button(label="M", id=self.id + "monitor")
         yield Input(value=formatted_value, id="value-input")
 
     def compose(self) -> ComposeResult:
@@ -972,6 +995,9 @@ class CanViewer(App[None]):
         ] = {}  # maps each SignalWidget ID to its properties
         self._preloaded_databases = list(preload_databases) if preload_databases else []
         self._selected_file: Path | None = None
+        self._selected_pane: str | None = None
+        self._monitored_signals: set[SignalWidget] = set()
+        self._monitoring_needs_refresh: bool = False
         self.preload_databases()
 
     def preload_databases(self) -> None:
@@ -1098,13 +1124,15 @@ class CanViewer(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent():
-            with TabPane("Monitor"):
-                yield from self.compose_monitor_tab()
+        with TabbedContent(initial=self._selected_pane):
+            with TabPane("Overview"):
+                yield from self.compose_overview_tab()
             with TabPane("Databases"):
                 yield from self.compose_databases_tab()
             with TabPane("Config"):
                 yield from self.compose_config_tab()
+            with TabPane("Monitoring", id="monitoring-pane"):
+                yield from self._monitored_signals
         yield Footer()
 
     def compose_config_tab(self) -> ComposeResult:
@@ -1143,7 +1171,7 @@ class CanViewer(App[None]):
         databases.add_columns("Name", "Path", "Messages", "Nodes")
         databases.add_rows(rows)
 
-    def compose_monitor_tab(self) -> ComposeResult:
+    def compose_overview_tab(self) -> ComposeResult:
         """
         Builds the main UI layout.
         """
@@ -1358,6 +1386,29 @@ class CanViewer(App[None]):
                 assert db is not None, "database name present in select but not loaded"
                 self._load_database(db)
                 pass
+
+    @on(UpdateSignalMonitoringStatus)
+    def on_signal_monitoring_status_changed(
+        self, event: UpdateSignalMonitoringStatus
+    ) -> None:
+        is_monitored = event.monitored
+        if is_monitored:
+            self._monitored_signals.add(event.signal_widget)
+            _logger.info("Starting monitoring signal %s", event.signal_widget)
+        else:
+            self._monitored_signals.remove(event.signal_widget)
+            _logger.info("Stopping monitoring signal %s", event.signal_widget)
+        self._monitoring_needs_refresh = True
+
+    @on(TabbedContent.TabActivated)
+    def on_tab_selected(self, event: TabbedContent.TabActivated) -> None:
+        pane_id = event.pane.id
+        self._selected_pane = pane_id
+        if pane_id is None:
+            return
+        if pane_id == "monitoring-pane" and self._monitoring_needs_refresh:
+            self._monitoring_needs_refresh = False
+            self.refresh(recompose=True)
 
     def on_database_load(self) -> None:
         if self._selected_file is None:
