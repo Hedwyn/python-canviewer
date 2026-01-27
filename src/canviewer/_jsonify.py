@@ -80,6 +80,7 @@ class ModelConfig:
 
     # placeholder for future user parametrization
     accumulate: bool = False
+    diff: bool = False
     target_folder: str | None = None
     preserve_files: bool = False
     enable_timestamping: bool = False
@@ -200,7 +201,21 @@ class JsonModel:
                 # found the placeholder we created automatically
                 # we can delete it
                 previous_values = []
-            previous_values.append(message_values)
+
+            if self._config.diff:
+                diff: dict[str, CanBasicTypes] = {}
+
+                current_value = {}
+                for prev_value in previous_values:
+                    current_value.update(prev_value)
+
+                for name, value in message_values.items():
+                    if current_value.get(name, None) != value:
+                        diff[name] = value
+                if diff:
+                    previous_values.append(diff)
+            else:
+                previous_values.append(message_values)
 
         else:
             assert isinstance(previous_values, dict), (
@@ -262,9 +277,10 @@ class JsonModel:
             return
 
         values = can_frame.decode(bytes(raw_message.data))
+        values = cast(dict[str, CanBasicTypes], values)
         if self._config.enable_timestamping:
             if self._config.relative_time:
-                ts: int | str = (datetime.now() - self.start_time).total_seconds()
+                ts: float | str = (datetime.now() - self.start_time).total_seconds()
             else:
                 ts = str(datetime.fromtimestamp(raw_message.timestamp))
             values["$timestamp"] = ts

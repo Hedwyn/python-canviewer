@@ -472,6 +472,16 @@ def canviewer(
     ),
 )
 @click.option(
+    "-d",
+    "--diff",
+    is_flag=True,
+    help=(
+        "In accumulate mode, only appends the values that changed "
+        "instead of appending everything. "
+        "If timestamping is on the new timestamp is always shown"
+    ),
+)
+@click.option(
     "-o",
     "--output-folder",
     type=str,
@@ -526,6 +536,7 @@ def canviewer_jsonify(
     channel: str,
     log_level: str,
     accumulate: bool,
+    diff: bool,
     output_folder: str,
     preserve_files: bool,
     timestamps: bool,
@@ -544,6 +555,7 @@ def canviewer_jsonify(
 
     config = ModelConfig(
         accumulate=accumulate,
+        diff=diff,
         target_folder=output_folder,
         preserve_files=preserve_files,
         enable_timestamping=timestamps,
