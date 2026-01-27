@@ -133,6 +133,8 @@ Usage: canviewer-jsonify [OPTIONS] DATABASE
 
 Options:
   -c, --channel TEXT              Name of the CAN channel to monitor
+  -sp, --substitute-prefix TEXT   A replace pattern to apply at the beginning
+                                  of CAN IDs
   -l, --log-level [critical|fatal|error|warn|warning|info|debug|notset]
                                   Log level to apply
   -a, --accumulate                When passed, stores all passed values in the
@@ -172,11 +174,24 @@ Simply `cd` to the displayed path and you should find all the JSON files for the
 
 ### Features
 
-`canviewer-jsonify` supports a few variations in the few it oeprates:
+`canviewer-jsonify` supports a few variations in the few it operates:
+
 - by default it shows the last (current) value of each message as a single dictionary in the JSON file. You can switch to `accumulate` mode (`-a/--accumulate`), in which all the history of values is shown as a list.
 - When using `accumulate`, you can show only the changed values by enabling diff mode (`-d/--diff`). This can be used to detect rising edges and value getting updated easily.
 - You can include the timestamp in the generated JSON by passing `-t/--timestamps`. The timestamp will be appended as a `$timestamp` key (leading '$' being there to differentiate it from normal signal names).
 - Timestamps are relative by default (to the very first message received). To enable absolute time instead, use `-a/--absolute`
+- You can modify pass a substitution pattern for the prefix of a given message with `-sp/--substitute-prefix`. For example, if you messages (in hex, 2 bits form) start with `123` and you'd like to replace with `ABC` for decoding, use `sp "123:ABC"`. Use wildcard to match any character, for example, passing `sp 1*3:A*C` on `0x17301234` will return `0xA7C01234`.
+
+### Watching values in real-time
+
+To follow values for a given RX message, using `watch` command is recommended:
+
+```
+watch -n 1 cat Bootloader_Identification.json
+```
+
+> [!NOTE]  
+> -n defines the period at which the output should be refreshed, here 1 second
 
 # License
 

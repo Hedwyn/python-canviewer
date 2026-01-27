@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+from re import sub
 import sys
 import time
 from dataclasses import dataclass, field
@@ -445,6 +446,28 @@ def canviewer(
     )
 
 
+def apply_substitution_pattern(
+    can_id: int,
+    pattern: str,
+    substitute: str,
+) -> int:
+    """
+    Replaces leading `pattern` in `can_id` by substitute.
+    pattern and substitute should be passed as hex string, without `0x`.
+    Wildcard '*' may be used to match any digit.
+    """
+    assert len(pattern) == len(substitute)
+    can_id_as_str = f"{can_id:08x}"
+    n = len(pattern)
+    chunk = list(can_id_as_str[:n])
+    match = "".join([chunk[i] if c == "*" else c for i, c in enumerate(pattern)])
+    if not can_id_as_str.startswith(match):
+        return can_id
+    header = "".join([chunk[i] if c == "*" else c for i, c in enumerate(substitute)])
+    modified_id = header + can_id_as_str[n:]
+    return int(modified_id, base=16)
+
+
 @click.command()
 @click.argument("database", type=str)
 @click.option(
@@ -453,6 +476,13 @@ def canviewer(
     default="can0",
     type=str,
     help="Name of the CAN channel to monitor",
+)
+@click.option(
+    "-sp",
+    "--substitute-prefix",
+    default=None,
+    type=str,
+    help="A replace pattern to apply at the beginning of CAN IDs",
 )
 @click.option(
     "-l",
@@ -534,6 +564,7 @@ def canviewer_jsonify(
     *,
     database: str,
     channel: str,
+    substitute_prefix: str | None,
     log_level: str,
     accumulate: bool,
     diff: bool,
@@ -546,6 +577,18 @@ def canviewer_jsonify(
     """
     database: Path to the database to JSONify
     """
+    if substitute_prefix is not None:
+        try:
+            l_pattern, l_substitute = substitute_prefix.split(":")
+            if len(l_pattern) != len(l_substitute):
+                click.error("Pattern and substitute must have the same length")
+                return
+        except ValueError:
+            click.echo("Substitution pattern must be passed as pattern:substitute")
+            return
+    else:
+        l_pattern = None
+
     logging.basicConfig(
         level=logging._nameToLevel[log_level],
         format="{asctime}: {levelname:<7}: {threadName:<20}: {message}",
@@ -590,5 +633,11 @@ def canviewer_jsonify(
             rich.print("Use Ctrl + C to leave")
             while True:
                 next_message = bus.recv()
+                assert next_message is not None
+                if l_pattern:
+                    postprocessed_id = apply_substitution_pattern(
+                        next_message.arbitration_id, l_pattern, l_substitute
+                    )
+                    next_message.arbitration_id = postprocessed_id
                 assert next_message is not None  # value can only be None on timeout
                 model.update_model(next_message)
