@@ -102,6 +102,7 @@ The snapshot is created in your current working directory and will be named `sna
 ### Navigating
 
 To navigate through pages, you can:
+
 - Use an empty string (`[ENTER]`) to go one page forward
 - Use `b` (`b + [ENTER]`) to go one page backward
 - type any page number to go to that page directly
@@ -118,6 +119,7 @@ Use `+` and `-` to decrease or increase the number of lines per page.
 
 This is an alternate entrypoint you can call with `canviewer-jsonify`. This command expects to receive the path to a database file, and will spawn one JSON file per message in a temporary folder (note: everything will be wiped on exiting the command).
 This command monitors the can bus actively and does the following:
+
 - **RX**: everytime a message is received, the corresponding JSON file will be updated with the new values. You can watch them in real time.with `tail -f` or similar commands.
 - **TX**: Whenever a JSON file for TX message is edited manually, the new values will be sent automatically to the CAN bus.
 
@@ -133,6 +135,28 @@ Options:
   -c, --channel TEXT              Name of the CAN channel to monitor
   -l, --log-level [critical|fatal|error|warn|warning|info|debug|notset]
                                   Log level to apply
+  -a, --accumulate                When passed, stores all passed values in the
+                                  message JSON file instead of only the last
+                                  one
+  -d, --diff                      In accumulate mode, only appends the values
+                                  that changed instead of appending
+                                  everything. If timestamping is on the new
+                                  timestamp is always shown
+  -o, --output-folder TEXT        If passed, the temp folder for JSON files
+                                  will be created in this location. If not, it
+                                  will be created somewhere in /tmp
+  -p, --preserve-files            Whether the temp folder and its JSON files
+                                  should be deleted on exit. Disabled by
+                                  default.
+  -t, --timestamps                Writes last reception timestamp in the JSON
+                                  file for message, in a LAST_RECEIVED key.
+  -abs, --absolute-time           Uses absolute time instead of relative for
+                                  timestamps.
+  -no-rx, --disable-rx            Does not monitor RX messages and uses the
+                                  model only to send message. Can be used when
+                                  trying to override RX messages, as they are
+                                  by default not overwritable when being
+                                  monitored
   --help                          Show this message and exit.
 ```
 
@@ -145,6 +169,14 @@ Use Ctrl + C to leave
  ```
 
 Simply `cd` to the displayed path and you should find all the JSON files for the messages in the passed database there. Files should be named following the schema `{message_name}.json`.
+
+### Features
+
+`canviewer-jsonify` supports a few variations in the few it oeprates:
+- by default it shows the last (current) value of each message as a single dictionary in the JSON file. You can switch to `accumulate` mode (`-a/--accumulate`), in which all the history of values is shown as a list.
+- When using `accumulate`, you can show only the changed values by enabling diff mode (`-d/--diff`). This can be used to detect rising edges and value getting updated easily.
+- You can include the timestamp in the generated JSON by passing `-t/--timestamps`. The timestamp will be appended as a `$timestamp` key (leading '$' being there to differentiate it from normal signal names).
+- Timestamps are relative by default (to the very first message received). To enable absolute time instead, use `-a/--absolute`
 
 # License
 
