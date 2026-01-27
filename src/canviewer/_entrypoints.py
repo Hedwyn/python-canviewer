@@ -501,6 +501,16 @@ def canviewer(
     ),
 )
 @click.option(
+    "-abs",
+    "--absolute-time",
+    is_flag=True,
+    help=(
+        """
+        Uses absolute time instead of relative for timestamps.
+        """
+    ),
+)
+@click.option(
     "-no-rx",
     "--disable-rx",
     is_flag=True,
@@ -511,6 +521,7 @@ def canviewer(
     ),
 )
 def canviewer_jsonify(
+    *,
     database: str,
     channel: str,
     log_level: str,
@@ -518,6 +529,7 @@ def canviewer_jsonify(
     output_folder: str,
     preserve_files: bool,
     timestamps: bool,
+    absolute_time: bool,
     disable_rx: bool,
 ) -> None:
     """
@@ -535,6 +547,7 @@ def canviewer_jsonify(
         target_folder=output_folder,
         preserve_files=preserve_files,
         enable_timestamping=timestamps,
+        relative_time=not absolute_time,
     )
     try:
         can_db = cantools.database.load_file(database)

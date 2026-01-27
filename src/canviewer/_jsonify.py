@@ -18,6 +18,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cached_property
 from threading import Thread
 from typing import Any, Callable, Generator, cast
 
@@ -82,6 +83,7 @@ class ModelConfig:
     target_folder: str | None = None
     preserve_files: bool = False
     enable_timestamping: bool = False
+    relative_time: bool = True
     force_extended_id: bool | None = None
 
 
@@ -106,6 +108,13 @@ class JsonModel:
         self._tmp_folder: str | None = None
         self._database = database
         self._inotify_ignore_set: set[str] = set()
+
+    @cached_property
+    def start_time(self) -> datetime:
+        """
+        Marks the start time the first time it is requested.
+        """
+        return datetime.now()
 
     @property
     def json_dump_options(self) -> dict[str, Any]:
@@ -254,8 +263,11 @@ class JsonModel:
 
         values = can_frame.decode(bytes(raw_message.data))
         if self._config.enable_timestamping:
-            human_ts = datetime.fromtimestamp(raw_message.timestamp)
-            values["LAST_RECEIVED"] = str(human_ts)  # type: ignore
+            if self._config.relative_time:
+                ts: int | str = (datetime.now() - self.start_time).total_seconds()
+            else:
+                ts = str(datetime.fromtimestamp(raw_message.timestamp))
+            values["$timestamp"] = ts
 
         self.update_message_values(
             can_frame.name, cast(dict[str, CanBasicTypes], values)
