@@ -551,6 +551,12 @@ def apply_substitution_pattern(
     ),
 )
 @click.option(
+    "-raw",
+    "--show-raw-data",
+    is_flag=True,
+    help="Includes raw data (ID and payload) in the generated JSON",
+)
+@click.option(
     "-no-rx",
     "--disable-rx",
     is_flag=True,
@@ -572,6 +578,7 @@ def canviewer_jsonify(
     preserve_files: bool,
     timestamps: bool,
     absolute_time: bool,
+    show_raw_data: bool,
     disable_rx: bool,
 ) -> None:
     """
@@ -603,6 +610,7 @@ def canviewer_jsonify(
         preserve_files=preserve_files,
         enable_timestamping=timestamps,
         relative_time=not absolute_time,
+        include_raw_data=show_raw_data,
     )
     try:
         can_db = cantools.database.load_file(database)

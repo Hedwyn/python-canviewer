@@ -86,6 +86,7 @@ class ModelConfig:
     enable_timestamping: bool = False
     relative_time: bool = True
     force_extended_id: bool | None = None
+    include_raw_data: bool = False
 
 
 class JsonModel:
@@ -207,20 +208,19 @@ class JsonModel:
                 # Note: control values (starting with $)
                 # should only be included in the diff if there are
                 # actual signal value changes
-                control_values: dict[str, CanBasicTypes] = {}
+                link_layer_values: dict[str, CanBasicTypes] = {}
 
                 current_value = {}
                 for prev_value in previous_values:
                     current_value.update(prev_value)
 
                 for name, value in message_values.items():
-                    if current_value.get(name, None) != value:
-                        if name.startswith("$"):
-                            control_values[name] = value
-                        else:
-                            diff[name] = value
+                    if name.startswith("$"):
+                        link_layer_values[name] = value
+                    elif current_value.get(name, None) != value:
+                        diff[name] = value
                 if diff:
-                    diff.update(control_values)
+                    diff.update(link_layer_values)
                     previous_values.append(diff)
             else:
                 previous_values.append(message_values)
@@ -273,6 +273,7 @@ class JsonModel:
         checks if the message targets something from the wrapped database
         and decodes and updates the values accordingly
         """
+        config = self._config
         try:
             can_frame = self._database.get_message_by_frame_id(
                 raw_message.arbitration_id
@@ -286,8 +287,13 @@ class JsonModel:
 
         values = can_frame.decode(bytes(raw_message.data))
         values = cast(dict[str, CanBasicTypes], values)
-        if self._config.enable_timestamping:
-            if self._config.relative_time:
+        if config.include_raw_data:
+            values["$id"] = f"{raw_message.arbitration_id:08X}"
+            prettified_data = " ".join(f"{byte:02X}" for byte in raw_message.data)
+            values["$data"] = prettified_data
+
+        if config.enable_timestamping:
+            if config.relative_time:
                 ts: float | str = (datetime.now() - self.start_time).total_seconds()
             else:
                 ts = str(datetime.fromtimestamp(raw_message.timestamp))

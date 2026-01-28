@@ -127,6 +127,7 @@ This command monitors the can bus actively and does the following:
 > Modifications on JSON files are monitored using inotify. Any message received on the bus that's not sent by this command itself will be considered RX and filtered out from inotify monitoring, so modifying them manually will not trigger a message send.
 
 ```shell
+❯ canviewer-jsonify --help
 Usage: canviewer-jsonify [OPTIONS] DATABASE
 
   database: Path to the database to JSONify
@@ -154,6 +155,8 @@ Options:
                                   file for message, in a LAST_RECEIVED key.
   -abs, --absolute-time           Uses absolute time instead of relative for
                                   timestamps.
+  -raw, --show-raw-data           Includes raw data (ID and payload) in the
+                                  generated JSON
   -no-rx, --disable-rx            Does not monitor RX messages and uses the
                                   model only to send message. Can be used when
                                   trying to override RX messages, as they are
