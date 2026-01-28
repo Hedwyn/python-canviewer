@@ -204,6 +204,10 @@ class JsonModel:
 
             if self._config.diff:
                 diff: dict[str, CanBasicTypes] = {}
+                # Note: control values (starting with $)
+                # should only be included in the diff if there are
+                # actual signal value changes
+                control_values: dict[str, CanBasicTypes] = {}
 
                 current_value = {}
                 for prev_value in previous_values:
@@ -211,8 +215,12 @@ class JsonModel:
 
                 for name, value in message_values.items():
                     if current_value.get(name, None) != value:
-                        diff[name] = value
+                        if name.startswith("$"):
+                            control_values[name] = value
+                        else:
+                            diff[name] = value
                 if diff:
+                    diff.update(control_values)
                     previous_values.append(diff)
             else:
                 previous_values.append(message_values)
