@@ -603,6 +603,10 @@ def canviewer_jsonify(
     )
     logging.getLogger("inotify").setLevel(logging.ERROR)
 
+    # forcinf accumulate if diff was passed
+    if diff:
+        accumulate = True
+
     config = ModelConfig(
         accumulate=accumulate,
         diff=diff,
