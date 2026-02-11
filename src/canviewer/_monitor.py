@@ -216,7 +216,9 @@ class CanMonitor:
         candidate_id = can_id & self._mask
         for db in self._dbs:
             try:
-                frame = db.get_message_by_frame_id(candidate_id)
+                frame = db.get_message_by_frame_id(
+                    candidate_id, force_extended_id=msg.is_extended_id
+                )
                 decoded_data = frame.decode(
                     msg.data, decode_choices=not self._always_show_value
                 )  # type: ignore[assignment]
