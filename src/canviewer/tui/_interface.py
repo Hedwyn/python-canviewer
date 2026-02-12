@@ -1241,7 +1241,11 @@ class CanViewer(App[None]):
             decoded_msg.frame_name
         )
         msg_id = MessageID(db.name, frame.name)
-        msg_widget = self.query_one(msg_id.query_key, MessageWidget)
+        try:
+            msg_widget = self.query_one(msg_id.query_key, MessageWidget)
+        except NoMatches:
+            # can happen during init time
+            return
         msg_widget.update(decoded_msg.timestamp)
         for signal in frame.signals:
             signal_id = SignalID(db.name, frame.name, signal.name)
