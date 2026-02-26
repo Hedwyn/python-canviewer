@@ -9,25 +9,23 @@ automatically as package scripts.
 
 from __future__ import annotations
 
+# built-in
 import asyncio
 import json
 import logging
 import os
-from re import sub
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-
-# built-in
+from pathlib import Path
 from typing import IO, Callable, Iterable, Iterator, Literal
 
+# 3rd-party
 import asciichartpy as acp
 import can
 import cantools
-
-# 3rd-party
 import click
 import pyperclip
 import rich
@@ -46,6 +44,7 @@ from ._monitor import (
     get_platform_default_driver,
 )
 from ._utils import CanIdPattern, InvalidPattern, convert_pattern_to_mask
+from ._player import parse_candump, replay, DumpParseError
 
 _logger = logging.getLogger(__name__)
 
@@ -653,3 +652,35 @@ def canviewer_jsonify(
                     next_message.arbitration_id = postprocessed_id
                 assert next_message is not None  # value can only be None on timeout
                 model.update_model(next_message)
+
+
+@click.command
+@click.argument("candump", type=Path)
+@click.option(
+    "-c",
+    "--channel",
+    default="can0",
+    type=str,
+    help="CAN channel on which to replay the dump",
+)
+@click.option(
+    "-std",
+    "--is-from-stdout",
+    is_flag=True,
+    help="Whether the CAN dump was piped from stdout or not",
+)
+def can_player(*, candump: Path, channel: str, is_from_stdout: bool) -> None:
+    """
+    Replays the passed candump.
+    """
+    if not candump.exists():
+        click.echo(f"Could not find {candump}")
+        sys.exit(1)
+    try:
+        messages = parse_candump(
+            candump.read_text().split("\n"), is_stdout=is_from_stdout
+        )
+    except DumpParseError as exc:
+        click.echo(f"Failed to parse candump: {exc}")
+        sys.exit(1)
+    asyncio.run(replay(messages, dest_channel=channel))

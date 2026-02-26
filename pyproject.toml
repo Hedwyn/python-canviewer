@@ -25,7 +25,7 @@ dependencies = [
   "click",
   "cantools",
   "python-can",
-  "exhausterr~=0.2.0",
+  "exhausterr~=0.4.0",
   "inotify",
   "pyperclip",
 ]
@@ -37,7 +37,8 @@ Source = "https://github.com/Hedwyn/python-canviewer"
 
 [project.scripts]
 canviewer = "canviewer._entrypoints:canviewer"
-canviewer-jsonify="canviewer._entrypoints:canviewer_jsonify"
+canviewer-jsonify = "canviewer._entrypoints:canviewer_jsonify"
+canviewer-player = "canviewer._entrypoints:can_player"
 
 [tool.hatch.version]
 source = "vcs"
