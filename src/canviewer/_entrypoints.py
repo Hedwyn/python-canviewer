@@ -664,12 +664,40 @@ def canviewer_jsonify(
     help="CAN channel on which to replay the dump",
 )
 @click.option(
+    "-a",
+    "--accelerate",
+    type=float,
+    default=1.0,
+    help="Accelerates the replay by that factor. All the time intervals will be divided by this value",
+)
+@click.option(
+    "-f",
+    "--forever",
+    is_flag=True,
+    help="Loops the replay forever",
+)
+@click.option(
+    "-r",
+    "--repeats",
+    type=int,
+    default=1,
+    help="How many times the candump should be replayed",
+)
+@click.option(
     "-std",
     "--is-from-stdout",
     is_flag=True,
     help="Whether the CAN dump was piped from stdout or not",
 )
-def can_player(*, candump: Path, channel: str, is_from_stdout: bool) -> None:
+def can_player(
+    *,
+    candump: Path,
+    channel: str,
+    is_from_stdout: bool,
+    accelerate: float,
+    forever: bool,
+    repeats: int,
+) -> None:
     """
     Replays the passed candump.
     """
@@ -677,10 +705,18 @@ def can_player(*, candump: Path, channel: str, is_from_stdout: bool) -> None:
         click.echo(f"Could not find {candump}")
         sys.exit(1)
     try:
-        messages = parse_candump(
-            candump.read_text().split("\n"), is_stdout=is_from_stdout
+        messages = list(
+            parse_candump(candump.read_text().split("\n"), is_stdout=is_from_stdout)
         )
     except DumpParseError as exc:
         click.echo(f"Failed to parse candump: {exc}")
         sys.exit(1)
-    asyncio.run(replay(messages, dest_channel=channel))
+    asyncio.run(
+        replay(
+            messages,
+            dest_channel=channel,
+            accelerate=accelerate,
+            repeats=repeats,
+            forever=forever,
+        )
+    )

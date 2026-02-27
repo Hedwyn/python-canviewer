@@ -6,7 +6,9 @@ Utilities to replay candumps.
 """
 
 from __future__ import annotations
-
+import warnings
+import math
+from typing import Literal, Sequence
 import asyncio
 import time
 from dataclasses import dataclass
@@ -119,23 +121,37 @@ def parse_candump(
 
 
 async def replay(
-    messages: Iterable[ReplayableMessage],
+    messages: Sequence[ReplayableMessage],
     dest_channel: str,
     src_channel: str | None = None,
+    *,
+    repeats: int = 1,
+    forever: bool = False,
+    accelerate: float = 1.0,
 ) -> None:
     """
     Replays the CAN `messages` on `dest_channel`.
     If `src_channel` is passed only replays the messages from that channel.
     """
+    if accelerate < 0:
+        raise ValueError("Acceleration should be a strictly positive value")
     start_time: float | None = None
+    repeat_count = 0
+    done = False
     with can.Bus(interface="socketcan", channel=dest_channel) as bus:
-        for message in messages:
-            if src_channel and message.channel != src_channel:
+        while not done:
+            repeat_count += 1
+            for message in messages:
+                if src_channel and message.channel != src_channel:
+                    continue
+                now = time.time()
+                if start_time is None:
+                    start_time = now
+                relative_time = message.relative_time / accelerate
+                delivery_time = start_time + relative_time
+                time_delta = delivery_time - now
+                await asyncio.sleep(time_delta)
+                bus.send(message.to_python_can_message())
+            if forever:
                 continue
-            now = time.time()
-            if start_time is None:
-                start_time = now
-            delivery_time = start_time + message.relative_time
-            time_delta = delivery_time - now
-            await asyncio.sleep(time_delta)
-            bus.send(message.to_python_can_message())
+            done = repeat_count == repeats
