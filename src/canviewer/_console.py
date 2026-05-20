@@ -6,19 +6,20 @@ Tracks the message data and exports it as a renderable table.
 """
 
 from __future__ import annotations
-from typing import Final, Iterable, ClassVar, Any, NamedTuple
+
 from dataclasses import dataclass
 from math import ceil
+from typing import Any, ClassVar, Final, Iterable, NamedTuple
 
 # 3rd-party
-from rich.table import Table
-from rich.pretty import Pretty
+from cantools.database.namedsignalvalue import NamedSignalValue
+from exhausterr import Err, Error, Ok, Result
 from rich.box import DOUBLE
-from exhausterr import Result, Ok, Err, Error
-
+from rich.pretty import Pretty
+from rich.table import Table
 
 # Local
-from ._monitor import UnknownMessage, DecodedMessage, CanMessage
+from ._monitor import CanMessage, DecodedMessage, UnknownMessage
 
 
 class CsvRecord(NamedTuple):
@@ -232,8 +233,13 @@ class MessageTable:
 
         for signal, buffer in message_plot_dict.items():
             received = message.data[signal]
+            signal_value = message.data[signal]
             try:
-                new_value = float(message.data[signal])
+                new_value = (
+                    signal_value.value
+                    if isinstance(signal_value, NamedSignalValue)
+                    else float(signal_value)
+                )
             except ValueError:
                 return Err(InvalidType(received))
             buffer.append(CsvRecord(message.timestamp, new_value))
