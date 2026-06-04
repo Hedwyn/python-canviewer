@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil
-from typing import Any, ClassVar, Final, Iterable, NamedTuple
+from typing import Any, ClassVar, Final, Iterable, Iterator, NamedTuple
 
 # 3rd-party
 from cantools.database.namedsignalvalue import NamedSignalValue
@@ -74,6 +74,18 @@ class MessageTable:
         self._plots: dict[str, dict[str, list[CsvRecord]]] = {}
         self._page_height: int = DEFAULT_WIDTH
         self._page_width: int = DEFAULT_WIDTH
+
+    def get_decoded_messages_sorted(self) -> list[DecodedMessage]:
+        def key(msg: DecodedMessage) -> int:
+            return msg.can_id
+
+        return sorted(self._decoded_messages.values(), key=key)
+
+    def get_raw_messages_sorted(self) -> list[CanMessage]:
+        def key(msg: CanMessage) -> int:
+            return msg.arbitration_id
+
+        return sorted(self._raw_messages.values(), key=key)
 
     def set_page_dimensions(self, width: int | None, height: int | None) -> int:
         """
@@ -268,7 +280,7 @@ class MessageTable:
     def export_single_message(self, message_id: int | str) -> Table | None:
         decoded: DecodedMessage | None = None
         if isinstance(message_id, str):
-            for decoded_msg in self._decoded_messages.values():
+            for decoded_msg in self.get_decoded_messages_sorted():
                 if decoded_msg.message_name == message_id:
                     decoded = decoded_msg
                     break
@@ -312,7 +324,7 @@ class MessageTable:
         table.add_column("Binary", style="green")
         table.add_column("Decoded", style="blue")
 
-        for decoded in self._decoded_messages.values():
+        for decoded in self.get_decoded_messages_sorted():
             if current_index > page_ends:
                 return table
             if any(
@@ -341,7 +353,7 @@ class MessageTable:
 
         if self._ignore_unknown_messages:
             return table
-        for raw_msg in self._raw_messages.values():
+        for raw_msg in self.get_raw_messages_sorted():
             if current_index > page_ends:
                 return table
             if self.filter_message_id(raw_msg.arbitration_id):
