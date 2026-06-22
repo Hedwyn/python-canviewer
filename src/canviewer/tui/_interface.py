@@ -386,9 +386,17 @@ class SignalWidget(Container):
             if properties is not None
             else isinstance(value, int)
         )
+        is_float = (
+            properties.signal_type is float
+            if properties is not None
+            else isinstance(value, float)
+        )
         if is_int:
-            assert isinstance(value, int)
+            assert isinstance(value, int), value
             formatted_value = hex(value)
+        elif is_float:
+            assert isinstance(value, (int, float)), value
+            formatted_value = f"{value:.2f}"
         else:
             formatted_value = str(value)
         if not self.is_tx:
@@ -401,7 +409,7 @@ class SignalWidget(Container):
 
         # if properties and not properties.is_float():
         if properties:
-            if properties.is_float():
+            if properties.signal_type is float:
                 assert isinstance(value, (int, float))
                 yield Slider(
                     min=properties.min_value or 0,
@@ -572,13 +580,13 @@ def extract_signal_properties(signal: Signal, *senders: str) -> SignalProperties
     Builds the signal properties out of a cantools Signal object.
     `senders` should provide the node names that emit the given signal.
     """
-    signal_type: type[int | str] = int
+    signal_type: type[int | str | float] = int
     if signal.choices:
-        choices: None | list[int] | list[str] = list(signal.choices)
+        choices: None | list[str] = [str(v) for v in signal.choices.values()]
         assert choices
         # Note: assumption here is that choices all have the same type
         # assert all([(type(c) is type(choices[0]) for c in choices[1:])])
-        if isinstance(choices[0], NamedSignalValue):
+        if isinstance(choices[0], (NamedSignalValue, str)):
             signal_type = str
             choices = [str(c) for c in choices]
     else:
@@ -586,7 +594,9 @@ def extract_signal_properties(signal: Signal, *senders: str) -> SignalProperties
     min_value = _get_sound_minimum(signal)
     max_value = _get_sound_maximum(signal)
     scale = signal.conversion.scale
-    offset = signal.conversion.offset
+    offset = float(signal.conversion.offset)
+    if scale != 1.0 or not offset.is_integer():
+        signal_type = float
 
     return SignalProperties(
         signal_type,
@@ -646,7 +656,7 @@ class SignalProperties:
     that an appropriate widget can be built.
     """
 
-    signal_type: type[int] | type[float] | type[str] = int
+    signal_type: type[int | str | float] = int
     min_value: float | None = None
     max_value: float | None = None
     scale: float = 1
