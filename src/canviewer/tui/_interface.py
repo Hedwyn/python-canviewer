@@ -74,8 +74,21 @@ from canviewer._persistency import add_database, get_config_path
 
 from ._slider import Slider
 
-main_theme = Theme(
-    name="canviewer",
+PRIMARY_COLOR = "#00A89D"
+
+theme_dark_green = Theme(
+    name="canviewer-dark-green",
+    primary=PRIMARY_COLOR,
+    dark=True,
+    variables={
+        "block-cursor-text-style": "none",
+        "footer-key-foreground": "#88C0D0",
+        "input-selection-background": "#81a1c1 35%",
+    },
+)
+
+theme_retro = Theme(
+    name="canviewer-retro",
     primary="cyan",
     secondary="orange",
     dark=True,
@@ -1031,12 +1044,19 @@ class CanViewer(App[None]):
         if added:
             self.loaded_databases = tuple(loaded_databases)
 
+    def register_themes(self) -> None:
+        """
+        Registers the custom themes in this project.
+        """
+        self.register_theme(theme_dark_green)
+        self.register_theme(theme_retro)
+
     def on_mount(self) -> None:
         """
         Starts the backend and tweaks widgets.
         """
-        self.register_theme(main_theme)
-        self.theme = "canviewer"
+        self.register_theme(theme_dark_green)
+        self.theme = "canviewer-dark-green"
         self.call_after_refresh(self.ensure_radioset_defaults)
         self.ensure_radioset_defaults()
         self.populate_databases()
