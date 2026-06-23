@@ -13,11 +13,14 @@ from asyncio import Future
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_never
 
+import cantools.database
+from cantools.database.can import Database
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
+    from pathlib import Path
 
     from cantools.database import Message
-    from cantools.database.can import Database
     from cantools.database.can.signal import Signal
 
 type SignalValue = int | float | str
@@ -133,6 +136,13 @@ class CodegenOptions:
     prefix_signal_names_with_msg: bool = False
     enforce_snakecase: bool = False
     name_conversion: NameConversionFn | BuiltinNameConversions = "camel_to_snake"
+    # formatting options below
+    indent: str = " " * 4
+    new_lines_after_cls: int = 2
+
+    def add_gap_after_cls(self) -> Iterator[str]:
+        for _ in range(self.new_lines_after_cls):
+            yield ""
 
     def convert_name(self, name: str, *, is_type: bool = False) -> str:
         if (conversion := self.get_conversion()) is not None:
@@ -171,7 +181,6 @@ def sanity_checks(database: Database, config: CodegenOptions) -> None:
                 )
 
 
-INDENT = " " * 4
 NEW_LINES_AFTER_CLS = 2
 
 
@@ -197,7 +206,7 @@ def camel_to_snake_case(name: str, *, is_type: bool = False) -> str:
 def _generate_message_code(message: Message, config: CodegenOptions) -> Iterator[str]:
     yield "@dataclass"
     yield f"class {config.convert_name(message.name, is_type=True)}:"
-    yield from (INDENT + s for s in _generate_signal_fields(message.signals, config))
+    yield from (config.indent + s for s in _generate_signal_fields(message.signals, config))
 
 
 def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
@@ -208,15 +217,36 @@ def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -
 def generate_dataclasses(
     messages: Iterable[Message],
     config: CodegenOptions | None = None,
-) -> Iterator[str]:
+) -> dict[str, list[str]]:
     config = config or CodegenOptions()
+    datacls_def: dict[str, list[str]] = {}
     for message in messages:
-        yield from _generate_message_code(message, config)
-        for _ in range(NEW_LINES_AFTER_CLS):
-            yield "\n"
+        datacls_def[message.name] = list(_generate_message_code(message, config))
+    return datacls_def
 
 
-def build_module(database: Database, config: CodegenOptions | None = None) -> str:
+def _build_node(
+    node_name: str,
+    message_cls_names: Iterable[str],
+    config: CodegenOptions,
+) -> Iterator[str]:
+    yield "@dataclass"
+    yield f"class {node_name}:"
+    for msg_name in message_cls_names:
+        cls_name = config.convert_name(msg_name, is_type=True)
+        field_name = config.convert_name(msg_name)
+        yield f"{config.indent}{field_name}: {cls_name}"
+
+
+DEFAULT_NODE_NAME = "Node"
+
+
+def build_module(
+    database: Database,
+    config: CodegenOptions | None = None,
+    node_name: str | None = None,
+) -> str:
+    node_name = node_name or DEFAULT_NODE_NAME
     config = config or CodegenOptions()
     sanity_checks(database, config)
     lines = [
@@ -224,8 +254,31 @@ def build_module(database: Database, config: CodegenOptions | None = None) -> st
         "from dataclasses import dataclass",
         "from typing import TYPE_CHECKING\n",
         "if TYPE_CHECKING:",
-        f"{INDENT}from canviewer.script import SignalContainer",
+        f"{config.indent}from canviewer.script import SignalContainer",
     ]
-    lines.extend(["\n"] * NEW_LINES_AFTER_CLS)
-    lines.extend(generate_dataclasses(database.messages))
+    lines.extend(config.add_gap_after_cls())
+    msg_cls_map = generate_dataclasses(database.messages)
+    for msg_dataclass_def in msg_cls_map.values():
+        lines.extend(msg_dataclass_def)
+        lines.extend(config.add_gap_after_cls())
+
+    lines.extend(_build_node(node_name, msg_cls_map.keys(), config))
+    lines.append("")
     return "\n".join(lines)
+
+
+def transpile_database(
+    db_path: Path,
+    output_path: Path | None = None,
+    config: CodegenOptions | None = None,
+    node_name: str | None = None,
+) -> Path:
+    config = config or CodegenOptions()
+    if output_path is None:
+        output_path = db_path.parent / (config.convert_name(db_path.stem) + ".py")
+    db = cantools.database.load_file(db_path)
+    assert isinstance(db, Database)
+    node_name = node_name or config.convert_name(db_path.stem, is_type=True)
+    module_def = build_module(db, node_name=node_name, config=config)
+    output_path.write_text(module_def)
+    return output_path

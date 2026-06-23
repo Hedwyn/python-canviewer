@@ -53,7 +53,6 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
-    Label,
     RadioButton,
     RadioSet,
     Select,
@@ -73,6 +72,7 @@ from canviewer._monitor import (
 from canviewer._persistency import add_database, get_config_path
 
 from ._slider import Slider
+from ._utils import Centered, IconedSwitch
 
 PRIMARY_COLOR = "#00A89D"
 
@@ -193,39 +193,89 @@ class MessageHistory:
 class MessageCollapsible(Collapsible):
     """
     The collapsible storing a message and its signals.
-    Provides a hiding button that allows removing the signal from the panel.
+    Provides:
+    - an eye button to hide/show the message in the panel
+    - a switch (TX only) to control whether the message is being sent
     """
+
+    # Single-cell glyphs so the toggle button hugs the character exactly.
+    ICON_SHOWN: ClassVar[str] = "◉"
+    ICON_HIDDEN: ClassVar[str] = "○"
 
     show_when_disabled: Reactive[bool] = reactive(False)
     is_tx: Reactive[bool] = reactive(True, recompose=True)
+    is_shown: Reactive[bool] = reactive(True)
+    period: Reactive[float | None] = reactive(None)
+
+    @property
+    def message_id(self) -> MessageID | None:
+        if self.id is None:
+            return None
+        return MessageID.from_identifier(self.id.replace("-collapsible", ""))
 
     def watch_show_when_disabled(self, old_value: bool, new_value: bool) -> None:
         if old_value is new_value:
             return
-        # force a refresh
-        self._toggle()
+        self._apply_visibility()
 
-    @on(Switch.Changed)
-    def on_toggle_show(self, event: Switch.Changed) -> None:
-        self._toggle(event.value)
+    def watch_is_shown(self, old_value: bool, new_value: bool) -> None:
+        if old_value is new_value:
+            return
+        self._apply_visibility()
+        try:
+            eye = self.query_one("#toggle-visibility", Button)
+        except NoMatches:
+            return
+        eye.label = self.ICON_SHOWN if new_value else self.ICON_HIDDEN
 
-    def _toggle(self, enabled: bool | None = None) -> None:
-        if enabled is None:
-            switch = self.query_one(Switch)
-            enabled = switch.value
+    def toggle_sender(self, value: bool) -> None:
+        """
+        Reflects the sender state on the switch without re-triggering a send,
+        e.g. when the global "Activate Senders" switch is used.
+        """
+        try:
+            switch = self.query_one("#message-send-toggle", Switch)
+        except NoMatches:
+            return
+        with switch.prevent(Switch.Changed):
+            switch.value = value
+
+    def _apply_visibility(self) -> None:
         if self.show_when_disabled:
             self.visible = True
         else:
-            self.visible = enabled
-        self._title.disabled = not enabled
+            self.visible = self.is_shown
+
+    @on(Button.Pressed, "#toggle-visibility")
+    def on_toggle_visibility(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.is_shown = not self.is_shown
+
+    @on(Switch.Changed, "#message-send-toggle")
+    def on_toggle_sender(self, event: Switch.Changed) -> None:
+        event.stop()
+        msg_id = self.message_id
+        if msg_id is None:
+            return
+        if event.value:
+            period = self.period / 1000 if self.period is not None else None
+            self.post_message(SendRequest(msg_id, period=period))
+        else:
+            self.post_message(StopSender(msg_id))
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="message-header"):
             yield self._title
-            direction_hint = "⇉" if not self.is_tx else "⇇"
-            yield Label(content=direction_hint, id="direction")
+            # TX = transmitted by us (outgoing), RX = received (incoming)
+            direction_hint = "⇉" if self.is_tx else "⇇"
+            yield Centered(content=direction_hint, id="direction")
             with Horizontal(id="message-toggler"):
-                yield Switch(value=True)
+                if self.is_tx:
+                    yield Switch(value=False, id="message-send-toggle")
+                yield Button(
+                    self.ICON_SHOWN if self.is_shown else self.ICON_HIDDEN,
+                    id="toggle-visibility",
+                )
         with self.Contents():
             yield from self._contents_list
 
@@ -285,44 +335,20 @@ class MessageWidget(Container):
             MessagePeriodChanged(MessageID.from_identifier(self.id), new_period)
         )
 
-    @on(Switch.Changed)
-    def on_sender_enabled(self, event: Switch.Changed) -> None:
-        _logger.info("Sender enabled")
-        assert self.period is not None, (
-            "Sender toggle should not be available for non-periodic messages"
-        )
-        assert self.id is not None
-        if event.value:
-            self.post_message(
-                SendRequest(
-                    MessageID.from_identifier(self.id), period=self.period / 1000
-                )
-            )
-        else:
-            self.post_message(StopSender(MessageID.from_identifier(self.id)))
-
     @on(Button.Pressed)
     def on_send_pressed(self, _: Button.Pressed) -> None:
         assert self.id is not None
         self.post_message(SendRequest(MessageID.from_identifier(self.id)))
 
-    def toggle_sender(self, value: bool) -> None:
-        try:
-            sender_toggle = self.query_one("#toggle-sender", Switch)
-        except NoMatches:
-            return
-        with sender_toggle.prevent(Switch.Changed):
-            sender_toggle.value = value
-
     def compose(self) -> ComposeResult:
         with Horizontal(id="message-banner"):
             if self.is_tx:
+                # The periodic-sender toggle lives in the message collapsible
+                # header; here we only expose the one-shot send and the period.
                 with Horizontal(id="message-controls"):
-                    if self.period is not None:
-                        yield Switch(id="toggle-sender", value=False)
-                    yield Button(label="Send")
+                    yield Button(label="▶", id="send")
 
-                    yield Label(content="Period (ms):")
+                    yield Centered(content="Period (ms):")
                     period_setter = Input(
                         value=str(self.period) if self.period is not None else "",
                         id="period",
@@ -332,7 +358,7 @@ class MessageWidget(Container):
                     yield period_setter
 
             with Horizontal(id="message-stats"):
-                yield Label(content="Count: ")
+                yield Centered(content="Count: ")
                 yield Digits(value=f"{self.count}")
                 if self.measured_period:
                     period_hint = (
@@ -340,7 +366,7 @@ class MessageWidget(Container):
                         if self.period is not None
                         else ""
                     )
-                    yield Label(content=f"Period: {period_hint}")
+                    yield Centered(content=f"Period: {period_hint}")
                     yield Digits(value=f"{1000 * self.measured_period:.1f}")
 
 
@@ -369,13 +395,11 @@ class SignalWidget(Container):
         self.current_value = value
         history.values.append(value)
 
-    @on(Button.Pressed)
-    def on_monitoring_toggle(self, event: Button.Pressed) -> None:
-        button = event.button
-        is_monitored = not (self.is_monitored)
+    @on(Switch.Changed, ".monitor-toggle")
+    def on_monitoring_toggle(self, event: Switch.Changed) -> None:
+        event.stop()
+        is_monitored = event.value
         self.is_monitored = is_monitored
-        # Note: using 'success' variant to represent being ON
-        button.variant = "success" if is_monitored else "default"
         self.post_message(UpdateSignalMonitoringStatus(self, is_monitored))
 
     @on(Input.Submitted)
@@ -413,7 +437,7 @@ class SignalWidget(Container):
         else:
             formatted_value = str(value)
         if not self.is_tx:
-            yield Label(content=formatted_value)
+            yield Centered(content=formatted_value)
             return
         if properties and properties.choices:
             options = [(str(choice), choice) for choice in properties.choices]
@@ -437,7 +461,12 @@ class SignalWidget(Container):
                     max=int(properties.max_value or 0),
                     value=int(self.current_value),
                 )
-        yield Button(label="M", id=self.id + "monitor")
+        yield IconedSwitch(
+            value=self.is_monitored,
+            on_icon="◉",
+            off_icon="○",
+            classes="monitor-toggle",
+        )
         yield Input(value=formatted_value, id="value-input")
 
     def compose(self) -> ComposeResult:
@@ -446,7 +475,7 @@ class SignalWidget(Container):
         """
         with Horizontal():
             with Horizontal():
-                yield Label(content=f"{self.label:25}")
+                yield Centered(content=f"{self.label:25}")
                 yield from self.get_value_widget()
 
 
@@ -1055,7 +1084,7 @@ class CanViewer(App[None]):
         """
         Starts the backend and tweaks widgets.
         """
-        self.register_theme(theme_dark_green)
+        self.register_themes()
         self.theme = "canviewer-dark-green"
         self.call_after_refresh(self.ensure_radioset_defaults)
         self.ensure_radioset_defaults()
@@ -1136,20 +1165,20 @@ class CanViewer(App[None]):
         db_select_value = db_options[0][1] if db_options else None
         with Horizontal(id="main-controls"):
             if db_options:
-                yield Label("Databases")
+                yield Centered("Databases")
                 yield Select(
                     id="database-selection", options=db_options, value=db_select_value
                 )
                 yield Button(label="Load", id="load-database")
-            yield Label(content="Activate Senders")
+            yield Centered(content="Activate Senders")
             yield Switch(
                 value=False,
                 animate=True,
                 id="toggle_senders",
             )
-            yield Label("Autosend")
+            yield Centered("Autosend")
             yield Switch(value=False, animate=True, id="enable_autosend")
-            yield Label("Show all")
+            yield Centered("Show all")
             yield Switch(value=False, animate=True, id="show_all")
 
     def compose(self) -> ComposeResult:
@@ -1168,14 +1197,14 @@ class CanViewer(App[None]):
     def compose_config_tab(self) -> ComposeResult:
         doc = self._config.parse_docstring()
         for f in fields(TUIConfig):
-            yield Label(content=f.name)
+            yield Centered(content=f.name)
             with Horizontal():
                 config_id = f"config-{f.name}"
                 if f.type == "bool":
                     yield Switch(id=config_id)
                 else:
                     yield Input(id=config_id)
-                yield Label(doc[f.name])
+                yield Centered(doc[f.name])
 
     def compose_databases_tab(self) -> ComposeResult:
         yield DataTable(id="databases")
@@ -1220,7 +1249,7 @@ class CanViewer(App[None]):
             default_node: str | None = None
             if db.nodes:
                 default_node = db.nodes[0]
-                yield Label(content=f"Producer ({db.name})")
+                yield Centered(content=f"Producer ({db.name})")
                 radio_set_id = f"{db.name}-producer"
                 radio_set = RadioSet(*db.nodes, id=radio_set_id)
                 yield radio_set
@@ -1239,9 +1268,12 @@ class CanViewer(App[None]):
                         is_tx,
                     )
                     msg_id = MessageID(db.name, msg.name)
-                    with MessageCollapsible(
+                    collapsible = MessageCollapsible(
                         title=msg.name, id=f"{msg_id.identifier}-collapsible"
-                    ):
+                    )
+                    collapsible.is_tx = is_tx
+                    collapsible.period = msg.cycle_time
+                    with collapsible:
                         container = LazyContainer(id=f"{msg_id.identifier}-container")
                         container.widgets = tuple(
                             self._compose_message_widgets(db.name, msg, is_tx=is_tx)
@@ -1347,6 +1379,15 @@ class CanViewer(App[None]):
         frame = self._backend.database_store.find_message(
             msg_id.message, msg_id.db_name
         )
+        # Keep the collapsible's sender toggle in sync with the new period (ms),
+        # so toggling it on later uses the user-set value.
+        try:
+            collapsible = self.query_one(
+                f"#{msg_id.identifier}-collapsible", MessageCollapsible
+            )
+            collapsible.period = event.period * 1000
+        except NoMatches:
+            pass
         if not self._backend.is_sender_active(frame):
             return
         _logger.info("Restarting sender for msg %s", msg_id.identifier)
@@ -1375,9 +1416,9 @@ class CanViewer(App[None]):
                     self._backend.start_senders()
                 else:
                     self._backend.stop_senders()
-                for msg_widget in self.query(MessageWidget):
-                    if msg_widget.is_tx:
-                        msg_widget.toggle_sender(event.value)
+                for collapsible in self.query(MessageCollapsible):
+                    if collapsible.is_tx:
+                        collapsible.toggle_sender(event.value)
 
     @on(SignalValueEdited)
     def on_signal_value_edited(self, event: SignalValueEdited) -> None:

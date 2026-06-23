@@ -13,6 +13,12 @@
     align: right middle;
     background: $panel;
 }
+/* Stretch the hint labels to the full row height so their content
+   (content-align: center middle) is vertically centered next to the
+   taller Digits / Input widgets. */
+#message-stats Centered, #message-controls Centered, #main-controls Centered {
+    height: 100%;
+}
 Digits {
     background: $panel;
     color: $primary;
@@ -29,6 +35,20 @@ Digits {
 }
 #message-toggler {
   align: right middle;
+}
+
+#toggle-visibility {
+  border: none;
+  min-width: 0;
+  width: auto;
+  height: 1;
+  padding: 0;
+  margin: 0 1;
+  background: $primary;
+  color: $background;
+}
+#toggle-visibility:hover {
+  background: $primary-lighten-1;
 }
 
 #lazy-container {
@@ -52,4 +72,30 @@ SignalWidget {
 }
 #databases-loader-controls {
   height: auto;
+}
+
+/* Systematic horizontal spacing so widgets in the control panels are not
+   stuck together. Applies to direct children of each panel. */
+#main-controls > *,
+#message-banner > *,
+#message-controls > *,
+#message-stats > *,
+#message-header > *,
+#message-toggler > *,
+#databases-loader-controls > *,
+SignalWidget Horizontal > * {
+  margin: 0 1;
+}
+
+/* Margin/gap color: the panels' background is what shows through the gaps
+   between their child widgets. Kept as a dedicated literal here so it can be
+   tuned independently of the surface/panel theme colors. */
+#main-controls,
+#message-banner,
+#message-controls,
+#message-stats,
+#message-header,
+#message-toggler,
+#databases-loader-controls {
+  background: #1b5a50;
 }
