@@ -18,6 +18,7 @@ from ._console import (
 from ._entrypoints import (
     collect_databases,
 )
+from ._jsonify import JsonModel, ModelConfig, find_sound_default
 from ._monitor import (
     CanMonitor,
     DecodedMessage,
@@ -36,23 +37,26 @@ from ._utils import (
 )
 
 __all__ = [
+    # Utility functions
+    "CanIdPattern",
     # Core monitoring classes
     "CanMonitor",
+    "CsvRecord",
     "DecodedMessage",
+    "InvalidName",
+    "InvalidPattern",
+    "InvalidType",
+    "JsonModel",
+    # Console/display functionality
+    "MessageTable",
+    "ModelConfig",
     "MuxSelectorValue",
     # Error classes
     "UnknownMessage",
     "UnsupportedSystem",
-    "InvalidName",
-    "InvalidType",
-    "InvalidPattern",
-    # Console/display functionality
-    "MessageTable",
-    "CsvRecord",
-    # Utility functions
-    "CanIdPattern",
+    "collect_databases",
     "convert_pattern_to_mask",
+    "find_sound_default",
     "get_platform_default_channel",
     "get_platform_default_driver",
-    "collect_databases",
 ]

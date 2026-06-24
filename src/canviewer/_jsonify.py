@@ -94,9 +94,7 @@ class JsonModel:
     Modelizes a CAN database with one JSON file per message.
     """
 
-    def __init__(
-        self, database: CanDatabase, config: ModelConfig | None = None
-    ) -> None:
+    def __init__(self, database: CanDatabase, config: ModelConfig | None = None) -> None:
         """
         Parameters
         ----------
@@ -275,9 +273,7 @@ class JsonModel:
         """
         config = self._config
         try:
-            can_frame = self._database.get_message_by_frame_id(
-                raw_message.arbitration_id
-            )
+            can_frame = self._database.get_message_by_frame_id(raw_message.arbitration_id)
         except KeyError:
             _logger.debug(
                 "Ignoring %08x as it is not a known ID in our database",
@@ -299,9 +295,7 @@ class JsonModel:
                 ts = str(datetime.fromtimestamp(raw_message.timestamp))
             values["$timestamp"] = ts
 
-        self.update_message_values(
-            can_frame.name, cast(dict[str, CanBasicTypes], values)
-        )
+        self.update_message_values(can_frame.name, cast(dict[str, CanBasicTypes], values))
 
     def _run_inotify_watcher(
         self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
@@ -343,9 +337,7 @@ class JsonModel:
                         )
                     )
                 except Exception as exc:
-                    _logger.debug(
-                        "Error occured while encoding %s", message_name, exc_info=True
-                    )
+                    _logger.debug("Error occured while encoding %s", message_name, exc_info=True)
                     if on_error is None:
                         raise
                     on_error(message_name, exc)
@@ -359,8 +351,6 @@ class JsonModel:
         Messages that are meant to be sent by this side (thus are not received on the bus)
         will be sent automatically on the given `bus` when a modification is detected.
         """
-        watcher = Thread(
-            target=self._run_inotify_watcher, args=(bus, on_error), daemon=True
-        )
+        watcher = Thread(target=self._run_inotify_watcher, args=(bus, on_error), daemon=True)
         watcher.start()
         return watcher
