@@ -189,10 +189,48 @@ class Tolerance(NamedTuple):
         return obtained >= lower_bound and obtained <= upper_bound
 
 
+class Condition[T](Protocol):
+    def is_met(self, value: T) -> bool: ...
+
+
+# Condition classes
+@dataclass
+class Equal[T]:
+    expected: T
+
+    def is_met(self, value: T) -> bool:
+        return self.expected == value
+
+
+@dataclass
+class AlmostEqual[T: int | float]:
+    expected: T
+    tolerance: Tolerance = field(default_factory=Tolerance)
+
+    def is_met(self, value: T) -> bool:
+        return self.tolerance.almost_equal(self.expected, value)
+
+
+@dataclass
+class DifferentThan[T]:
+    value: T
+
+    def is_met(self, value: T) -> bool:
+        return self.value != value
+
+
 class Waiter[T](NamedTuple):
+    """
+    A simple handle on top of a future
+    specifiying under which conditions the future should be triggered.
+    If `condition` is given, `future` shall only be triggered
+    when the signal value is equal to condition.
+    If a `tolerance` is given, almost_equal will be used
+    instead of equal using the given tolerance.
+    """
+
     future: Future[T]
-    condition: T | None = None
-    tolerance: Tolerance | None = None
+    condition: Condition[T] | None = None
 
 
 @dataclass
@@ -222,28 +260,36 @@ class SignalContainer[T: SignalValue]:
         self.last_seen = timestamp
         self.value = new_value
 
-        for future, condition, tolerance in self._watchers:
-            is_met = condition is None
-            if not is_met:
-                if tolerance is None:
-                    is_met = new_value == condition
-                else:
-                    assert isinstance(new_value, float)
-                    assert isinstance(condition, float)
-                    is_met = tolerance.almost_equal(condition, new_value)
+        done_watchers: list[Waiter[T]] = []
+        for waiter in self._watchers:
+            future, condition = waiter
+            is_met = condition is None or condition.is_met(new_value)
             if is_met:
                 future.set_result(new_value)
-        self._watchers.clear()
+                done_watchers.append(waiter)
+        for waiter in done_watchers:
+            self._watchers.remove(waiter)
 
     def wait_next(self, future: Future[T] | None = None) -> Future[T]:
         future = future or Future()
         self._watchers.append(Waiter(future))
         return future
 
+    def wait_change(self, future: Future[T] | None = None) -> Future[T]:
+        future = future or Future()
+        # note: if we never received that signal,
+        # the first received should trigger this as well
+        self._watchers.append(
+            Waiter(
+                future,
+                condition=DifferentThan(self.value) if self.last_seen is not None else None,
+            ),
+        )
+        return future
+
     async def wait_until(
         self,
-        condition: T,
-        tolerance: Tolerance | None = None,
+        value: T,
         future: Future[T] | None = None,
     ) -> Future[T]:
         """
@@ -252,13 +298,13 @@ class SignalContainer[T: SignalValue]:
         converter.state.wait_until("DC_Ready")
         """
         future = future or Future()
-        waiter = Waiter(future, condition, tolerance)
+        waiter = Waiter(future, Equal(value))
         self._watchers.append(waiter)
         return future
 
     async def wait_until_approximately(
         self,
-        condition: T,
+        value: T,
         future: Future[T] | None = None,
         margin_absolute: float | None = None,
         margin_relative: float | None = None,
@@ -270,7 +316,9 @@ class SignalContainer[T: SignalValue]:
         """
         tolerance = Tolerance.from_values(margin_relative, margin_absolute)
         future = future or Future()
-        waiter = Waiter(future, condition, tolerance)
+        if not isinstance(value, (int, float)):
+            raise TypeError("Signal is not numeric, cannot use approximation")
+        waiter = Waiter(future, AlmostEqual(value, tolerance))  # type: ignore[misc]
         self._watchers.append(waiter)
         return future
 
