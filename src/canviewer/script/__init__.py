@@ -136,6 +136,7 @@ class CodegenOptions:
     prefix_signal_names_with_msg: bool = False
     enforce_snakecase: bool = False
     name_conversion: NameConversionFn | BuiltinNameConversions = "camel_to_snake"
+    inline_database: bool = False
     # formatting options below
     indent: str = " " * 4
     new_lines_after_cls: int = 2
@@ -203,25 +204,39 @@ def camel_to_snake_case(name: str, *, is_type: bool = False) -> str:
     return make_canonical(name.lower())
 
 
-def _generate_message_code(message: Message, config: CodegenOptions) -> Iterator[str]:
+def _generate_message_code(
+    message: Message,
+    config: CodegenOptions,
+    db_var_name: str = "DB",
+) -> Iterator[str]:
     yield "@dataclass"
     yield f"class {config.convert_name(message.name, is_type=True)}:"
+    yield (
+        f"{config.indent}struct: ClassVar[Message] = "
+        f'{db_var_name}.get_message_by_name("{message.name}")'
+    )
     yield from (config.indent + s for s in _generate_signal_fields(message.signals, config))
 
 
 def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
     for sig in signals:
-        yield f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[float]"
+        yield (
+            f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[float]"
+            f' =  find_sound_default(struct.get_signal_by_name("{sig.name}"))'
+        )
 
 
 def generate_dataclasses(
     messages: Iterable[Message],
     config: CodegenOptions | None = None,
+    db_var_name: str = "DB",
 ) -> dict[str, list[str]]:
     config = config or CodegenOptions()
     datacls_def: dict[str, list[str]] = {}
     for message in messages:
-        datacls_def[message.name] = list(_generate_message_code(message, config))
+        datacls_def[message.name] = list(
+            _generate_message_code(message, config, db_var_name=db_var_name),
+        )
     return datacls_def
 
 
@@ -243,21 +258,48 @@ DEFAULT_NODE_NAME = "Node"
 
 def build_module(
     database: Database,
+    database_path: Path | None = None,
     config: CodegenOptions | None = None,
     node_name: str | None = None,
 ) -> str:
     node_name = node_name or DEFAULT_NODE_NAME
     config = config or CodegenOptions()
     sanity_checks(database, config)
+    # imports
     lines = [
         "from __future__ import annotations\n",
         "from dataclasses import dataclass",
-        "from typing import TYPE_CHECKING\n",
+        "from typing import ClassVar, TYPE_CHECKING\n",
+        "import cantools.database\n",
+        "from canviewer import find_sound_default",
         "if TYPE_CHECKING:",
         f"{config.indent}from canviewer.script import SignalContainer",
+        f"{config.indent}from cantools.database import Message",
     ]
     lines.extend(config.add_gap_after_cls())
-    msg_cls_map = generate_dataclasses(database.messages)
+    # loading database
+
+    db_var_name = "DB" if database_path is None else config.convert_name(database_path.stem).upper()
+    if config.inline_database:
+        db_content_var_name = f"{db_var_name}_CONTENT"
+        lines.extend(
+            [
+                f'{db_content_var_name}="""\\',
+                *database.as_kcd_string().split("\n"),
+                '"""',
+                f"{db_var_name}=cantools.database.load_string({db_content_var_name})",
+            ],
+        )
+    else:
+        if database_path is None:
+            raise ValueError(
+                "Database must be inlined in the generated code when database path is omitted. "
+                "Use inline_database=True in config or give the database path",
+            )
+        lines.extend([f'{db_var_name}=cantools.database.load_file("{database_path}")'])
+
+    lines.append("")
+    msg_cls_map = generate_dataclasses(database.messages, db_var_name=db_var_name)
     for msg_dataclass_def in msg_cls_map.values():
         lines.extend(msg_dataclass_def)
         lines.extend(config.add_gap_after_cls())
@@ -279,6 +321,6 @@ def transpile_database(
     db = cantools.database.load_file(db_path)
     assert isinstance(db, Database)
     node_name = node_name or config.convert_name(db_path.stem, is_type=True)
-    module_def = build_module(db, node_name=node_name, config=config)
+    module_def = build_module(db, db_path, node_name=node_name, config=config)
     output_path.write_text(module_def)
     return output_path
