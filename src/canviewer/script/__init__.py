@@ -74,6 +74,9 @@ class SignalContainer[T: SignalValue]:
     _watchers: list[Waiter[T]] = field(default_factory=list)
     _hooks: set[Callable[[Self], object]] = field(default_factory=set)
 
+    def __repr__(self) -> str:
+        return str(self.value)
+
     @classmethod
     def from_signal(cls, signal: Signal) -> Self:
         default_value = cast("T", find_sound_default(signal))
@@ -160,6 +163,7 @@ class CodegenOptions:
     indent: str = " " * 4
     new_lines_after_cls: int = 2
     format_code: bool = False
+    generate_main: bool = False
 
     def add_gap_after_cls(self) -> Iterator[str]:
         for _ in range(self.new_lines_after_cls):
@@ -322,7 +326,7 @@ def _build_node(
     for msg_name in message_cls_names:
         cls_name = config.convert_name(msg_name, is_type=True)
         field_name = config.convert_name(msg_name)
-        yield f"{config.indent}{field_name}: {cls_name}"
+        yield (f"{config.indent}{field_name}: {cls_name} = field(default_factory={cls_name})")
 
 
 DEFAULT_NODE_NAME = "Node"
@@ -377,7 +381,20 @@ def build_module(
 
     lines.extend(_build_node(node_name, msg_cls_map.keys(), config))
     lines.append("")
+    if config.generate_main:
+        lines.extend(_generate_main(config, node_name))
     return "\n".join(lines)
+
+
+def _generate_main(config: CodegenOptions, node_cls_name: str) -> Iterator[str]:
+    yield 'if __name__ == "__main__":'
+    yield from (
+        config.indent + s
+        for s in [
+            "from pprint import pprint",
+            f"pprint({node_cls_name}())",
+        ]
+    )
 
 
 def transpile_database(
