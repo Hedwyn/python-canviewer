@@ -14,7 +14,8 @@ import time
 import warnings
 from asyncio import Future
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_never
+from functools import partial
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_never, cast
 
 import cantools.database
 from cantools.database.can import Database
@@ -67,10 +68,21 @@ class Waiter[T](NamedTuple):
 @dataclass
 class SignalContainer[T: SignalValue]:
     value: T
+    struct: Signal
     last_seen: float | None = None
 
     _watchers: list[Waiter[T]] = field(default_factory=list)
     _hooks: set[Callable[[Self], object]] = field(default_factory=set)
+
+    @classmethod
+    def from_signal(cls, signal: Signal) -> Self:
+        default_value = cast("T", find_sound_default(signal))
+        return cls(default_value, struct=signal)
+
+    @classmethod
+    def get_factory(cls, signal: Signal) -> Callable[[], Self]:
+        default_value = cast("T", find_sound_default(signal))
+        return partial(cls, default_value, signal)
 
     def update(self, new_value: T, timestamp: float | None = None) -> None:
         timestamp = timestamp or time.time()
@@ -279,11 +291,10 @@ def _find_signal_type(signal: Signal) -> type[CanBasicTypes]:
 def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
     for sig in signals:
         sig_type = _find_signal_type(sig)
-        raw_default = find_sound_default(sig)
-        casted_default = sig_type(raw_default)
         yield (
             f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[{sig_type.__name__}]"
-            f" =  field(default_factory=lambda: SignalContainer({casted_default!r}))"
+            f" =  field(default_factory="
+            f'SignalContainer.get_factory(struct.get_signal_by_name("{sig.name}")))'
         )
 
 
@@ -332,7 +343,6 @@ def build_module(
         "from dataclasses import dataclass, field",
         "from typing import ClassVar, TYPE_CHECKING\n",
         "import cantools.database\n",
-        "from canviewer import find_sound_default",
         "from canviewer.script import SignalContainer",
         "if TYPE_CHECKING:",
         f"{config.indent}from cantools.database import Message",
