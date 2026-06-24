@@ -197,6 +197,24 @@ class DifferentThan[T]:
         return self.value != value
 
 
+@dataclass
+class LesserThan[T: int | float]:
+    value: T
+    strict: bool = False
+
+    def is_met(self, value: T) -> bool:
+        return value < self.value if self.strict else value <= self.value
+
+
+@dataclass
+class Greater[T: int | float]:
+    value: T
+    strict: bool = False
+
+    def is_met(self, value: T) -> bool:
+        return value > self.value if self.strict else value >= self.value
+
+
 class Waiter[T](NamedTuple):
     """
     A simple handle on top of a future
