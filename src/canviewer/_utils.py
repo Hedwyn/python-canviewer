@@ -6,15 +6,25 @@ Miscaellenous utilities
 """
 
 from __future__ import annotations
+
+import asyncio
+import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import can
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from can import Message
+    from can.bus import BusABC
 
 
 class InvalidPattern(Exception):
     """
     Whenever the pattern passed by the user is invalid
     """
-
-    pass
 
 
 @dataclass(eq=True)
@@ -68,7 +78,7 @@ def _convert_from_hex(pattern: str) -> int:
         return int(pattern, 16)
     except ValueError as exc:
         raise InvalidPattern(
-            f"Got invalid characters after `*` in pattern, expected hex digits: {pattern}"
+            f"Got invalid characters after `*` in pattern, expected hex digits: {pattern}",
         ) from exc
 
 
@@ -88,7 +98,7 @@ def convert_pattern_to_mask(pattern: str) -> CanIdPattern | int:
             mask, pattern = pattern.split(",")
         except ValueError as exc:
             raise InvalidPattern(
-                f"Passing pattern with `,` expects only two values, got {pattern}"
+                f"Passing pattern with `,` expects only two values, got {pattern}",
             ) from exc
         return CanIdPattern(int(mask, 16), int(pattern, 16))
 
@@ -111,3 +121,27 @@ def convert_pattern_to_mask(pattern: str) -> CanIdPattern | int:
         return CanIdPattern(pattern_value, mask)
 
     return _convert_from_hex(pattern)
+
+
+async def async_bus_poller(
+    bus: BusABC,
+    min_period: float = 0.001,
+    max_period: float = 0.256,
+) -> AsyncIterator[Message]:
+    period = min_period
+    while True:
+        msg_count = 0
+        ctime = time.time()
+        try:
+            while (next_msg := bus.recv(timeout=0.0)) is not None:
+                msg_count += 1
+                yield next_msg
+        except can.CanOperationError:
+            return
+        if msg_count == 0:
+            period = min(period * 2, max_period)
+        else:
+            period = max(period / msg_count, min_period)
+        next_due = ctime + period
+        sleep_time = max((next_due - time.time()), 0)
+        await asyncio.sleep(sleep_time)

@@ -33,13 +33,12 @@ from ._monitor import (
 from ._utils import (
     CanIdPattern,
     InvalidPattern,
+    async_bus_poller,
     convert_pattern_to_mask,
 )
 
 __all__ = [
-    # Utility functions
     "CanIdPattern",
-    # Core monitoring classes
     "CanMonitor",
     "CsvRecord",
     "DecodedMessage",
@@ -47,13 +46,12 @@ __all__ = [
     "InvalidPattern",
     "InvalidType",
     "JsonModel",
-    # Console/display functionality
     "MessageTable",
     "ModelConfig",
     "MuxSelectorValue",
-    # Error classes
     "UnknownMessage",
     "UnsupportedSystem",
+    "async_bus_poller",
     "collect_databases",
     "convert_pattern_to_mask",
     "find_sound_default",
