@@ -8,7 +8,10 @@ Scripting utilities for canviewer.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import time
+import warnings
 from asyncio import Future
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_never
@@ -144,6 +147,7 @@ class CodegenOptions:
     # formatting options below
     indent: str = " " * 4
     new_lines_after_cls: int = 2
+    format_code: bool = False
 
     def add_gap_after_cls(self) -> Iterator[str]:
         for _ in range(self.new_lines_after_cls):
@@ -206,6 +210,46 @@ def camel_to_snake_case(name: str, *, is_type: bool = False) -> str:
         return "".join(word.capitalize() for word in words if word)
 
     return make_canonical(name.lower())
+
+
+def format_code(code: str) -> str:
+    """Format code using ruff. Returns unformatted code with warning if ruff unavailable."""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "ruff", "format", "-"],
+            input=code,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        code = result.stdout
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "ruff", "check", "--select", "I,TCH,COM", "--fix", "-"],
+            check=False,
+            input=code,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        return result.stdout  # noqa: TRY300
+    except subprocess.CalledProcessError as e:
+        if "No module named ruff" in e.stderr:
+            warnings.warn(
+                "ruff is not available, code will not be formatted",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        else:
+            warnings.warn(f"ruff formatting failed: {e.stderr}", RuntimeWarning, stacklevel=2)
+        return code
+    except subprocess.TimeoutExpired:
+        warnings.warn(
+            "ruff formatting timed out, code will not be formatted",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return code
 
 
 def _generate_message_code(
@@ -289,8 +333,8 @@ def build_module(
         "from typing import ClassVar, TYPE_CHECKING\n",
         "import cantools.database\n",
         "from canviewer import find_sound_default",
+        "from canviewer.script import SignalContainer",
         "if TYPE_CHECKING:",
-        f"{config.indent}from canviewer.script import SignalContainer",
         f"{config.indent}from cantools.database import Message",
     ]
     lines.extend(config.add_gap_after_cls())
@@ -339,5 +383,7 @@ def transpile_database(
     assert isinstance(db, Database)
     node_name = node_name or config.convert_name(db_path.stem, is_type=True)
     module_def = build_module(db, db_path, node_name=node_name, config=config)
+    if config.format_code:
+        module_def = format_code(module_def)
     output_path.write_text(module_def)
     return output_path
