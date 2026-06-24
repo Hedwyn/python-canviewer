@@ -20,15 +20,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from threading import Thread
-from typing import Any, Callable, Generator, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import inotify.adapters
-from can.bus import BusABC
 from can.message import Message
-from cantools.database import Message as CanFrame
-from cantools.database.can import Database as CanDatabase
-from cantools.database.can.signal import Signal as CanSignal
 from cantools.database.namedsignalvalue import NamedSignalValue
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
+
+    from can.bus import BusABC
+    from cantools.database import Message as CanFrame
+    from cantools.database.can import Database as CanDatabase
+    from cantools.database.can.signal import Signal as CanSignal
 
 type CanBasicTypes = float | int | str
 
@@ -135,7 +139,7 @@ class JsonModel:
             raise RuntimeError(
                 "This model has not been opened yet. "
                 "Create the temp files for the model by calling .open() method"
-                " or using the context manager protocol"
+                " or using the context manager protocol",
             )
         return self._tmp_folder
 
@@ -148,7 +152,8 @@ class JsonModel:
         is attached.
         """
         with tempfile.TemporaryDirectory(
-            dir=self._config.target_folder, delete=not self._config.preserve_files
+            dir=self._config.target_folder,
+            delete=not self._config.preserve_files,
         ) as tmp:
             self._tmp_folder = tmp
             self.create_json_files(tmp)
@@ -215,7 +220,7 @@ class JsonModel:
                 for name, value in message_values.items():
                     if name.startswith("$"):
                         link_layer_values[name] = value
-                    elif current_value.get(name, None) != value:
+                    elif current_value.get(name) != value:
                         diff[name] = value
                 if diff:
                     diff.update(link_layer_values)
@@ -282,7 +287,7 @@ class JsonModel:
             return
 
         values = can_frame.decode(bytes(raw_message.data))
-        values = cast(dict[str, CanBasicTypes], values)
+        values = cast("dict[str, CanBasicTypes]", values)
         if config.include_raw_data:
             values["$id"] = f"{raw_message.arbitration_id:08X}"
             prettified_data = " ".join(f"{byte:02X}" for byte in raw_message.data)
@@ -295,10 +300,12 @@ class JsonModel:
                 ts = str(datetime.fromtimestamp(raw_message.timestamp))
             values["$timestamp"] = ts
 
-        self.update_message_values(can_frame.name, cast(dict[str, CanBasicTypes], values))
+        self.update_message_values(can_frame.name, cast("dict[str, CanBasicTypes]", values))
 
     def _run_inotify_watcher(
-        self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
+        self,
+        bus: BusABC,
+        on_error: Callable[[str, Exception], None] | None = None,
     ) -> None:
         i = inotify.adapters.Inotify()
         i.add_watch(self.tmp_folder)
@@ -334,7 +341,7 @@ class JsonModel:
                             arbitration_id=frame.frame_id,
                             data=frame.encode(values, strict=False),
                             is_extended_id=is_extended_id,
-                        )
+                        ),
                     )
                 except Exception as exc:
                     _logger.debug("Error occured while encoding %s", message_name, exc_info=True)
@@ -343,7 +350,9 @@ class JsonModel:
                     on_error(message_name, exc)
 
     def start_inotify_watcher(
-        self, bus: BusABC, on_error: Callable[[str, Exception], None] | None = None
+        self,
+        bus: BusABC,
+        on_error: Callable[[str, Exception], None] | None = None,
     ) -> Thread:
         """
         Starts watching for changes in any of the monitored JSON files for messages.

@@ -16,12 +16,16 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_ne
 import cantools.database
 from cantools.database.can import Database
 
+from canviewer import find_sound_default
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from cantools.database import Message
     from cantools.database.can.signal import Signal
+
+    from canviewer._jsonify import CanBasicTypes
 
 type SignalValue = int | float | str
 
@@ -218,11 +222,24 @@ def _generate_message_code(
     yield from (config.indent + s for s in _generate_signal_fields(message.signals, config))
 
 
+def _find_signal_type(signal: Signal) -> type[CanBasicTypes]:
+    if signal.choices:
+        return str
+    if signal.conversion.scale != 1.0:
+        return float
+    if signal.offset.is_integer():
+        return int
+    return float
+
+
 def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
     for sig in signals:
+        sig_type = _find_signal_type(sig)
+        raw_default = find_sound_default(sig)
+        casted_default = sig_type(raw_default)
         yield (
-            f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[float]"
-            f' =  find_sound_default(struct.get_signal_by_name("{sig.name}"))'
+            f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[{sig_type.__name__}]"
+            f" =  field(default_factory=lambda: SignalContainer({casted_default!r}))"
         )
 
 
@@ -268,7 +285,7 @@ def build_module(
     # imports
     lines = [
         "from __future__ import annotations\n",
-        "from dataclasses import dataclass",
+        "from dataclasses import dataclass, field",
         "from typing import ClassVar, TYPE_CHECKING\n",
         "import cantools.database\n",
         "from canviewer import find_sound_default",
