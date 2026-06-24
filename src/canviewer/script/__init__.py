@@ -7,31 +7,161 @@ Scripting utilities for canviewer.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import subprocess
 import sys
 import time
 import warnings
 from asyncio import Future
-from dataclasses import dataclass, field
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, is_dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self, assert_never, cast
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    NamedTuple,
+    Protocol,
+    Self,
+    assert_never,
+    cast,
+    get_type_hints,
+)
 
 import cantools.database
 from cantools.database.can import Database
+from cantools.database.namedsignalvalue import NamedSignalValue
+from typing_extensions import TypeForm
 
-from canviewer import find_sound_default
+from canviewer import async_bus_poller, find_sound_default
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import AsyncGenerator, Callable, Iterable, Iterator
     from pathlib import Path
 
+    from _typeshed import DataclassInstance
+    from can.bus import BusABC
     from cantools.database import Message
     from cantools.database.can.signal import Signal
 
     from canviewer._jsonify import CanBasicTypes
 
 type SignalValue = int | float | str
+
+
+def iter_annotations[T](type_hint: TypeForm[object], annotation_type: type[T]) -> Iterator[T]:
+    """
+    Iterates through annotations in an `Annotated` type hint.
+    """
+    metadata = getattr(type_hint, "__metadata__", None)
+    if metadata is None:
+        return
+    for annotation in metadata:
+        if isinstance(annotation, annotation_type):
+            yield annotation
+
+
+def get_annotations[T](type_hint: TypeForm[object], annotation_type: type[T]) -> list[T]:
+    """
+    Returns all annotations of type `T` found in the given type hint, as a list.
+    """
+    return list(iter_annotations(type_hint, annotation_type=annotation_type))
+
+
+def get_annotation[T](
+    type_hint: TypeForm[object],
+    annotation_type: type[T],
+    *,
+    strict: bool = False,
+) -> T | None:
+    """
+    Inspects the annotations in the `Annotated` fields of `type_hint`.
+    Returns None if `type_hint` is not an Annotated or if no annotations
+    of type `annotation_type` could be found.
+    If strict is False, returns the first found annotation of type `annotation_type`,
+    otherwise ensure that no more than one annotation of that type is there and raises
+    ValueError otherwise.
+    """
+    annotations = get_annotations(type_hint, annotation_type)
+    if not annotations:
+        return None
+
+    if strict and len(annotations) > 1:
+        raise ValueError(f"Found more than one annotation of type {annotation_type} in {type_hint}")
+    return annotations.pop()
+
+
+def get_signal_map(node: DataclassInstance) -> dict[str, dict[str, SignalContainer[CanBasicTypes]]]:
+    signal_map: dict[str, dict[str, SignalContainer[CanBasicTypes]]] = {}
+    node_cls = node.__class__
+    for field_name, type_hint in get_type_hints(node_cls, include_extras=True).items():
+        subcls = getattr(node, field_name)
+        if not (is_dataclass(subcls)):
+            continue
+        msg_name = get_annotation(type_hint, str, strict=True)
+        assert msg_name is not None
+        msg_map = signal_map.setdefault(msg_name, {})
+        for subfield_name, hint in get_type_hints(subcls.__class__, include_extras=True).items():
+            signal_container = getattr(subcls, subfield_name)
+            if not isinstance(signal_container, SignalContainer):
+                continue
+            signal_name = get_annotation(hint, str, strict=True)
+            assert signal_name is not None
+            msg_map[signal_name] = signal_container
+    return signal_map
+
+
+async def run_dispatcher(
+    bus: BusABC,
+    database: Database,
+    signal_map: dict[str, dict[str, SignalContainer[CanBasicTypes]]],
+    mask: int = 0xFFFF_FFFF,
+) -> None:
+    async for next_msg in async_bus_poller(bus):
+        can_id = next_msg.arbitration_id & mask
+        try:
+            target_msg = database.get_message_by_frame_id(can_id)
+        except KeyError:
+            continue
+        message_container = signal_map.get(target_msg.name)
+        if message_container is None:
+            warnings.warn(
+                f"Received a message {target_msg.name} that's unknown in the auto-generated code. "
+                "Either the auto-generated code is out of sync or you are misuing this function",
+                stacklevel=2,
+            )
+            continue
+
+        decoded = target_msg.decode(bytes(next_msg.data))
+        assert isinstance(decoded, dict)
+
+        for signal_name, value in decoded.items():
+            signal_container = message_container.get(signal_name)
+            if signal_container is None:
+                warnings.warn(
+                    f"Received a signal {target_msg.name}:{signal_name} "
+                    "that's unknown in the auto-generated code. "
+                    "Either the auto-generated code is out of sync or you are misuing the function",
+                    stacklevel=2,
+                )
+                continue
+            if isinstance(value, NamedSignalValue):
+                value = value.name  # noqa: PLW2901
+            signal_container.update(value)
+
+
+@asynccontextmanager
+async def monitor[T: DataclassInstance](
+    bus: BusABC,
+    database: Database,
+    node: T,
+    mask: int = 0xFFFF_FFFF,
+) -> AsyncGenerator[T]:
+    signal_map = get_signal_map(node)
+    with bus:
+        dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map, mask=mask))
+        yield node
+        dispatcher_task.cancel()
 
 
 class Tolerance(NamedTuple):
@@ -94,7 +224,7 @@ class SignalContainer[T: SignalValue]:
 
         for future, condition, tolerance in self._watchers:
             is_met = condition is None
-            if is_met:
+            if not is_met:
                 if tolerance is None:
                     is_met = new_value == condition
                 else:
@@ -295,8 +425,11 @@ def _find_signal_type(signal: Signal) -> type[CanBasicTypes]:
 def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
     for sig in signals:
         sig_type = _find_signal_type(sig)
+        sig_type_annotation = (
+            f'Annotated[{SignalContainer.__name__}[{sig_type.__name__}], "{sig.name}"]'
+        )
         yield (
-            f"{config.convert_name(sig.name)}: {SignalContainer.__name__}[{sig_type.__name__}]"
+            f"{config.convert_name(sig.name)}: {sig_type_annotation}"
             f" =  field(default_factory="
             f'SignalContainer.get_factory(struct.get_signal_by_name("{sig.name}")))'
         )
@@ -316,7 +449,7 @@ def generate_dataclasses(
     return datacls_def
 
 
-def _build_node(
+def _generate_node(
     node_name: str,
     message_cls_names: Iterable[str],
     config: CodegenOptions,
@@ -326,7 +459,10 @@ def _build_node(
     for msg_name in message_cls_names:
         cls_name = config.convert_name(msg_name, is_type=True)
         field_name = config.convert_name(msg_name)
-        yield (f"{config.indent}{field_name}: {cls_name} = field(default_factory={cls_name})")
+        cls_type_annotation = f'Annotated[{cls_name}, "{msg_name}"]'
+        yield (
+            f"{config.indent}{field_name}: {cls_type_annotation} = field(default_factory={cls_name})"
+        )
 
 
 DEFAULT_NODE_NAME = "Node"
@@ -345,11 +481,11 @@ def build_module(
     lines = [
         "from __future__ import annotations\n",
         "from dataclasses import dataclass, field",
-        "from typing import ClassVar, TYPE_CHECKING\n",
+        "from typing import Annotated, ClassVar\n",
         "import cantools.database\n",
+        "from cantools.database.can import Database",
         "from canviewer.script import SignalContainer",
-        "if TYPE_CHECKING:",
-        f"{config.indent}from cantools.database import Message",
+        "from cantools.database import Message  # noqa: TC002",
     ]
     lines.extend(config.add_gap_after_cls())
     # loading database
@@ -372,14 +508,15 @@ def build_module(
                 "Use inline_database=True in config or give the database path",
             )
         lines.extend([f'{db_var_name}=cantools.database.load_file("{database_path}")'])
-
-    lines.append("")
+    # note: this is required to narrow type down properly
+    # as the `load_database` is generic and can return other types than CAN Databases
+    lines.append(f"assert isinstance({db_var_name}, Database)")
     msg_cls_map = generate_dataclasses(database.messages, db_var_name=db_var_name)
     for msg_dataclass_def in msg_cls_map.values():
         lines.extend(msg_dataclass_def)
         lines.extend(config.add_gap_after_cls())
 
-    lines.extend(_build_node(node_name, msg_cls_map.keys(), config))
+    lines.extend(_generate_node(node_name, msg_cls_map.keys(), config))
     lines.append("")
     if config.generate_main:
         lines.extend(_generate_main(config, node_name))
