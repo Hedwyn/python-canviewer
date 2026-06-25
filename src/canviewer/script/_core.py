@@ -136,16 +136,23 @@ async def run_dispatcher(
 
 
 @asynccontextmanager
-async def monitor[T: DataclassInstance](
+async def monitor[T: CanInterface[str]](
     bus: BusABC,
-    database: Database,
-    node: T,
+    interface: T,
     mask: int = 0xFFFF_FFFF,
 ) -> AsyncGenerator[T]:
-    signal_map = get_signal_map(node)
+    signal_map = get_signal_map(interface)
+    database = interface.database
     with bus:
+        senders = [
+            asyncio.create_task(send_periodically(bus, message))
+            for message in interface.messages
+            if message.send_policy == SendPolicy.CYCLIC
+        ]
         dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map, mask=mask))
-        yield node
+        yield interface
+        for sender in senders:
+            sender.cancel()
         dispatcher_task.cancel()
 
 
@@ -396,6 +403,13 @@ class MessageMixin:
     struct: Frame
     send_policy: SendPolicy = SendPolicy.INACTIVE
 
+    @property
+    def period(self) -> float | None:
+        if (period := self.struct.cycle_time) is None:
+            return None
+        # Note: cycle_time is given as ms in cantools
+        return period / 1000
+
     @classmethod
     def get_type_hints(cls) -> dict[str, TypeForm[object]]:
         return get_type_hints(cls, include_extras=True)
@@ -444,3 +458,12 @@ class CanInterface[T: str]:
                 continue
             msg.send_policy = SendPolicy.CYCLIC if cycle_time else SendPolicy.ON_CHANGE
         self._node = value
+
+
+async def send_periodically(bus: BusABC, message: MessageMixin) -> None:
+    if (period := message.period) is None:
+        raise ValueError(f"{message} does not have a period defined")
+
+    while True:
+        message.send_to(bus)
+        await asyncio.sleep(period)
