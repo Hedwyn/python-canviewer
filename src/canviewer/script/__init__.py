@@ -21,13 +21,13 @@ from ._codegen import (
 )
 from ._core import (
     AlmostEqual,
-    CanInterface,
     Condition,
     DifferentThan,
     Equal,
     GreaterThan,
     LesserThan,
     MessageMixin,
+    Node,
     Pilot,
     SignalContainer,
     SignalValue,
@@ -44,7 +44,7 @@ from ._core import (
 __all__ = [
     "AlmostEqual",
     "BuiltinNameConversions",
-    "CanInterface",
+    "Node",
     "CodegenOptions",
     "Condition",
     "DifferentThan",

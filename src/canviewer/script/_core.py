@@ -143,7 +143,7 @@ async def run_dispatcher(
 
 def _start_sender_tasks(
     bus: BusABC,
-    interface: CanInterface[str],
+    interface: Node[str],
 ) -> list[Task[None]]:
     """
     Shall only be used in async context.
@@ -156,7 +156,7 @@ def _start_sender_tasks(
 
 
 @asynccontextmanager
-async def monitor[T: CanInterface[str]](
+async def monitor[T: Node[str]](
     bus: BusABC,
     interface: T,
     mask: int = 0xFFFF_FFFF,
@@ -172,11 +172,11 @@ async def monitor[T: CanInterface[str]](
         dispatcher_task.cancel()
 
 
-type PilotFn[T: CanInterface[str]] = Callable[[T, Pilot[T]], Coroutine[None, None, None]]
+type PilotFn[T: Node[str]] = Callable[[T, Pilot[T]], Coroutine[None, None, None]]
 
 
 @dataclass
-class Pilot[T: CanInterface[str]]:
+class Pilot[T: Node[str]]:
     """
     Sets up a CAN interface with automatic bus management.
 
@@ -184,7 +184,7 @@ class Pilot[T: CanInterface[str]]:
 
     Parameters
     ----------
-    interface_cls : type[CanInterface[str]]
+    interface_cls : type[Node[str]]
         The interface class to instantiate
     bus : BusABC | None
         The CAN bus to use. If None, creates one using autobus()
@@ -588,10 +588,11 @@ class MessageMixin:
         )
 
 
-class CanInterface[T: str]:
-    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+@dataclass
+class Node[T: str]:
+    # __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
     database: ClassVar[Database]
-    _node: T | None = None
+    _node_name: T | None = None
 
     @property
     def messages(self) -> Iterator[MessageMixin]:
@@ -601,11 +602,11 @@ class CanInterface[T: str]:
 
     @property
     def node(self) -> T | None:
-        return self._node
+        return self._node_name
 
     @node.setter
     def node(self, value: T) -> None:
-        if self._node == value:
+        if self._node_name == value:
             return
         for msg in self.messages:
             cycle_time = msg.struct.cycle_time
@@ -613,7 +614,7 @@ class CanInterface[T: str]:
                 msg.send_policy = SendPolicy.INACTIVE
                 continue
             msg.send_policy = SendPolicy.CYCLIC if cycle_time else SendPolicy.ON_CHANGE
-        self._node = value
+        self._node_name = value
 
 
 async def send_periodically(bus: BusABC, message: MessageMixin) -> None:

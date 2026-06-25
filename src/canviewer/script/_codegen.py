@@ -22,7 +22,7 @@ from typing import (
 import cantools.database
 from cantools.database.can import Database
 
-from ._core import CanInterface, MessageMixin, SignalContainer
+from ._core import MessageMixin, Node, SignalContainer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from cantools.database import Message
     from cantools.database.can.signal import Signal
 
-    from canviewer._jsonify import CanBasicTypes
+    from canviewer import CanBasicTypes
 
 type BuiltinNameConversions = Literal["camel_to_snake", "canonical"]
 
@@ -214,7 +214,7 @@ def _generate_node(
     config: CodegenOptions,
 ) -> Iterator[str]:
     yield "@dataclass"
-    yield f"class {node_name}({CanInterface.__name__}):"
+    yield f"class {node_name}({Node.__name__}):"
     db_name = config.convert_name(node_name).upper()
     yield f"{config.indent}database = {db_name}"
     for msg in database.messages:
@@ -223,7 +223,8 @@ def _generate_node(
         field_name = config.convert_name(msg_name)
         cls_type_annotation = f'Annotated[{cls_name}, "{msg_name}"]'
         yield (
-            f"{config.indent}{field_name}: {cls_type_annotation} = field(default_factory={cls_name})"
+            f"{config.indent}{field_name}: "
+            f"{cls_type_annotation} = field(default_factory={cls_name})"
         )
     if not config.add_top_level_signal_aliases:
         return
@@ -270,7 +271,8 @@ def build_module(
         "from typing import Annotated, ClassVar\n",
         "import cantools.database\n",
         "from cantools.database.can import Database",
-        "from canviewer.script import SignalContainer, MessageMixin, CanInterface",
+        "from canviewer.script import "
+        f"{SignalContainer.__name__}, {MessageMixin.__name__}, {Node.__name__}",
         "from cantools.database import Message  # noqa: TC002",
     ]
     lines.extend(config.add_gap_after_cls())
