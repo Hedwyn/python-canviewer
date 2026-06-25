@@ -180,6 +180,22 @@ def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -
         )
 
 
+def _generate_update_method(signals: Iterable[Signal], config: CodegenOptions) -> Iterator[str]:
+    signals = list(signals)
+    params = ", ".join(
+        f"{config.convert_name(sig.name)}: {_find_signal_type(sig).__name__} | None = None"
+        for sig in signals
+    )
+    yield f"def update(self, {params}) -> None:"
+    if not signals:
+        yield f"{config.indent}pass"
+        return
+    for sig in signals:
+        field_name = config.convert_name(sig.name)
+        yield f"{config.indent}if {field_name} is not None:"
+        yield f"{2 * config.indent}self.{field_name}.update({field_name})"
+
+
 def _generate_message_code(
     message: Message,
     config: CodegenOptions,
@@ -192,6 +208,8 @@ def _generate_message_code(
         f'{db_var_name}.get_message_by_name("{message.name}")'
     )
     yield from (config.indent + s for s in _generate_signal_fields(message.signals, config))
+    yield config.indent
+    yield from (config.indent + s for s in _generate_update_method(message.signals, config))
 
 
 def generate_dataclasses(
