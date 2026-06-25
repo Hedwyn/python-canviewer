@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, nullcontext
 from dataclasses import Field, dataclass, field, fields, is_dataclass
 from enum import Enum, auto
 from functools import partial
+from math import ceil
 from typing import (  # noqa: UP035
     TYPE_CHECKING,
     Any,
@@ -48,6 +49,9 @@ if TYPE_CHECKING:
     from canviewer import CanBasicTypes
 
 type SignalValue = int | float | str
+
+_DEFAULT_TICK = 0.05
+_DEFAULT_RAMP_DURATION = 1.0
 
 
 def iter_annotations[T](type_hint: TypeForm[object], annotation_type: type[T]) -> Iterator[T]:
@@ -216,7 +220,7 @@ class Pilot[T: CanInterface[str]]:
         # Set up bus
         bus = self.use_bus or autobus(channel=self.channel, interface=self.interface)
         bus_context: ContextManager[object] = (
-            self.use_bus if self.use_bus is not None else nullcontext(self.use_bus)
+            bus if self.use_bus is None else nullcontext(self.use_bus)
         )
         # Lazy approach: if same pilot object is used in multiple places
         # the bus is only initialized once
@@ -425,6 +429,61 @@ class SignalContainer[T: SignalValue]:
             waiter = Waiter(future, condition)
             self._watchers.append(waiter)
         return future
+
+    async def ramp_to(
+        self,
+        target: float,
+        *,
+        rate: float | None = None,
+        duration: float | None = None,
+        step_size: float | None = None,
+    ) -> None:
+        """
+        Gradually move the signal value towards `target`.
+
+        Exactly one of `rate` (units per second) or `duration` (total seconds)
+        may be given; if neither is passed, defaults to a 1s ramp.
+        The value is updated periodically by `step_size` increments
+        (defaults to a 50ms update tick).
+
+        Example
+        -------
+        await converter.setpoint.ramp_to(400, rate=10)
+        await converter.setpoint.ramp_to(400, duration=2.5, step_size=5)
+        """
+        if not isinstance(self.value, float):
+            raise TypeError("Cannot ramp on non-numeric values")
+        if rate is not None and duration is not None:
+            raise ValueError("Pass either 'rate' or 'duration', not both")
+        start = self.value
+        if not isinstance(start, (int, float)):
+            raise TypeError("Signal is not numeric, cannot ramp")
+
+        delta = target - start
+        if rate is not None:
+            if rate <= 0:
+                raise ValueError("'rate' must be strictly positive")
+            total_time = abs(delta) / rate
+        else:
+            total_time = duration if duration is not None else _DEFAULT_RAMP_DURATION
+
+        if delta == 0 or total_time <= 0:
+            self.update(cast("T", target))
+            return
+
+        default_tick = _DEFAULT_TICK
+        if step_size is None:
+            n_steps = max(1, round(total_time / default_tick))
+        else:
+            n_steps = max(1, ceil(abs(delta) / abs(step_size)))
+        increment = delta / n_steps
+        interval = total_time / n_steps
+
+        for step in range(1, n_steps):
+            await asyncio.sleep(interval)
+            self.update(cast("T", start + increment * step))
+        await asyncio.sleep(interval)
+        self.update(cast("T", target))
 
     def wait_next(self, future: Future[T] | None = None) -> Future[T]:
         return self.wait_condition(None, future)

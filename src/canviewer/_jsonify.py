@@ -50,8 +50,6 @@ def find_sound_default(signal: CanSignal) -> CanBasicTypes:  # noqa: PLR0911
             return str(first_option)
         return first_option
     if signal.minimum is not None:
-        if signal.maximum:
-            return float((signal.maximum + signal.minimum) / 2)
         return float(signal.minimum)
     if signal.offset:
         return float(signal.offset)
