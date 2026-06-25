@@ -13,18 +13,23 @@ import time
 import warnings
 from asyncio import Future
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import Field, dataclass, field, is_dataclass
 from enum import Enum, auto
 from functools import partial
 from typing import (
     TYPE_CHECKING,
+    Any,
+    ClassVar,
     NamedTuple,
     Protocol,
     Self,
+    cast,
     get_type_hints,
     overload,
 )
 
+from can import Message
+from cantools.database.can import Message as Frame
 from cantools.database.namedsignalvalue import NamedSignalValue
 from typing_extensions import TypeForm
 
@@ -236,6 +241,28 @@ class Waiter[T](NamedTuple):
     condition: Condition | None = None
 
 
+class SendPolicy(Enum):
+    """
+    Whether a given message should be sent and how it should be handled.
+
+    INACTIVE: message's not being sent at all (e.g., RX message),
+    explicit sends will trigger a warning.
+
+    EXPLICIT: message will only be sent when explicity called by the script,
+    main difference with `INACTIVE` is that it won't issue a warning.
+
+    CYCLIC: sends the message periodically, according the cycle time defined
+    in the message struct.
+
+    ON_CHANGE: sends the message only when one of the signal value is changed.
+    """
+
+    INACTIVE = auto()
+    EXPLICIT = auto()
+    CYCLIC = auto()
+    ON_CHANGE = auto()
+
+
 @dataclass
 class SignalContainer[T: SignalValue]:
     value: T
@@ -262,8 +289,10 @@ class SignalContainer[T: SignalValue]:
         expected_type: type[T],
     ) -> Callable[[], SignalContainer[T]]:
         default_value = find_sound_default(signal)
-        assert isinstance(default_value, expected_type)
-        return partial(SignalContainer, default_value, signal)
+        if not isinstance(default_value, expected_type):
+            default_value = expected_type(default_value)
+
+        return partial(SignalContainer, cast("T", default_value), signal)
 
     def update(self, new_value: T, timestamp: float | None = None) -> None:
         timestamp = timestamp or time.time()
@@ -362,23 +391,27 @@ class SignalContainer[T: SignalValue]:
         return self.wait_condition(Greater(other, strict=False))
 
 
-class SendPolicy(Enum):
-    """
-    Whether a given message should be sent and how it should be handled.
+class MessageMixin:
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+    struct: Frame
 
-    INACTIVE: message's not being sent at all (e.g., RX message),
-    explicit sends will trigger a warning.
+    @classmethod
+    def get_type_hints(cls) -> dict[str, TypeForm[object]]:
+        return get_type_hints(cls, include_extras=True)
 
-    EXPLICIT: message will only be sent when explicity called by the script,
-    main difference with `INACTIVE` is that it won't issue a warning.
+    def send_to(self, bus: BusABC) -> None:
+        payload: dict[str, CanBasicTypes] = {}
+        for f_name, type_hint in self.get_type_hints().items():
+            container = getattr(self, f_name)
+            if not isinstance(container, SignalContainer):
+                continue
+            if (signal_name := get_annotation(type_hint, str)) is None:
+                raise ValueError("Missing name annotation on signal")
+            payload[signal_name] = container.value
 
-    CYCLIC: sends the message periodically, according the cycle time defined
-    in the message struct.
-
-    ON_CHANGE: sends the message only when one of the signal value is changed.
-    """
-
-    INACTIVE = auto()
-    EXPLICIT = auto()
-    CYCLIC = auto()
-    ON_CHANGE = auto()
+        bus.send(
+            Message(
+                arbitration_id=self.struct.frame_id,
+                data=self.struct.encode(payload),
+            ),
+        )

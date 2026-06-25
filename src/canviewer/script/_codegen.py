@@ -20,9 +20,9 @@ from typing import (
 )
 
 import cantools.database
-from cantools.database.can import Database, message
+from cantools.database.can import Database
 
-from canviewer.script._core import SignalContainer
+from ._core import MessageMixin, SignalContainer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -186,7 +186,7 @@ def _generate_message_code(
     db_var_name: str = "DB",
 ) -> Iterator[str]:
     yield "@dataclass"
-    yield f"class {config.convert_name(message.name, is_type=True)}:"
+    yield f"class {config.convert_name(message.name, is_type=True)}({MessageMixin.__name__}):"
     yield (
         f"{config.indent}struct: ClassVar[Message] = "
         f'{db_var_name}.get_message_by_name("{message.name}")'
@@ -268,7 +268,7 @@ def build_module(
         "from typing import Annotated, ClassVar\n",
         "import cantools.database\n",
         "from cantools.database.can import Database",
-        "from canviewer.script import SignalContainer",
+        "from canviewer.script import SignalContainer, MessageMixin",
         "from cantools.database import Message  # noqa: TC002",
     ]
     lines.extend(config.add_gap_after_cls())
