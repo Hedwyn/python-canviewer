@@ -39,7 +39,7 @@ type CanBasicTypes = float | int | str
 _logger = logging.getLogger(__name__)
 
 
-def find_sound_default(signal: CanSignal) -> CanBasicTypes:
+def find_sound_default(signal: CanSignal) -> CanBasicTypes:  # noqa: PLR0911
     """
     Finds a reasonable default value of a given declared CAN signal.
     """

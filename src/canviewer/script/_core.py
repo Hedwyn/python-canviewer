@@ -319,7 +319,7 @@ class LesserThan:
 
 
 @dataclass
-class Greater:
+class GreaterThan:
     value: int | float
     strict: bool = False
 
@@ -417,7 +417,9 @@ class SignalContainer[T: SignalValue]:
         future: Future[T] | None = None,
     ) -> Future[T]:
         future = future or Future()
-        if condition is not None and condition.is_met(self.value):
+        # checking if the condition is already met, without having to wait
+        # for the next message
+        if self.last_seen is not None and condition is not None and condition.is_met(self.value):
             future.set_result(self.value)
         else:
             waiter = Waiter(future, condition)
@@ -487,10 +489,10 @@ class SignalContainer[T: SignalValue]:
         return self.wait_condition(LesserThan(other, strict=False))
 
     def __gt__(self, other: float) -> Future[T]:
-        return self.wait_condition(Greater(other, strict=True))
+        return self.wait_condition(GreaterThan(other, strict=True))
 
     def __ge__(self, other: float) -> Future[T]:
-        return self.wait_condition(Greater(other, strict=False))
+        return self.wait_condition(GreaterThan(other, strict=False))
 
 
 @dataclass
