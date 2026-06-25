@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import can
+from exhausterr import Err, Ok
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -121,6 +122,51 @@ def convert_pattern_to_mask(pattern: str) -> CanIdPattern | int:
         return CanIdPattern(pattern_value, mask)
 
     return _convert_from_hex(pattern)
+
+
+def autobus(
+    channel: str | None = None,
+    interface: str | None = None,
+) -> BusABC:
+    """
+    Creates a CAN bus with automatic platform defaults.
+
+    If channel or interface are None, uses platform-specific defaults.
+
+    Parameters
+    ----------
+    channel : str | None
+        CAN channel name. If None, uses platform default.
+    interface : str | None
+        CAN driver/interface name. If None, uses platform default.
+
+    Returns
+    -------
+    can.Bus
+        The created CAN bus instance
+
+    Raises
+    ------
+    UnsupportedSystem
+        If platform is unsupported and defaults cannot be determined
+    """
+    from ._monitor import get_platform_default_channel, get_platform_default_driver
+
+    if channel is None:
+        match get_platform_default_channel():
+            case Ok(ch):
+                channel = ch
+            case Err(err):
+                raise err.exception_cls(str(err))
+
+    if interface is None:
+        match get_platform_default_driver():
+            case Ok(iface):
+                interface = iface
+            case Err(err):
+                raise err.exception_cls(str(err))
+
+    return can.Bus(channel=channel, interface=interface)
 
 
 async def async_bus_poller(

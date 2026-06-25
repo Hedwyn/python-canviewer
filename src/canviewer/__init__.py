@@ -18,7 +18,7 @@ from ._console import (
 from ._entrypoints import (
     collect_databases,
 )
-from ._jsonify import JsonModel, ModelConfig, find_sound_default
+from ._jsonify import CanBasicTypes, JsonModel, ModelConfig, find_sound_default
 from ._monitor import (
     CanMonitor,
     DecodedMessage,
@@ -34,10 +34,12 @@ from ._utils import (
     CanIdPattern,
     InvalidPattern,
     async_bus_poller,
+    autobus,
     convert_pattern_to_mask,
 )
 
 __all__ = [
+    "CanBasicTypes",
     "CanIdPattern",
     "CanMonitor",
     "CsvRecord",
@@ -52,6 +54,7 @@ __all__ = [
     "UnknownMessage",
     "UnsupportedSystem",
     "async_bus_poller",
+    "autobus",
     "collect_databases",
     "convert_pattern_to_mask",
     "find_sound_default",
