@@ -20,7 +20,7 @@ from typing import (
 )
 
 import cantools.database
-from cantools.database.can import Database
+from cantools.database.can import Database, message
 
 from canviewer.script._core import SignalContainer
 
@@ -46,10 +46,11 @@ class NameConversionFn(Protocol):
 @dataclass
 class CodegenOptions:
     flatten_signals_tree: bool = False
-    prefix_signal_names_with_msg: bool = False
+    prefix_alias_names_with_msg: bool = False
     enforce_snakecase: bool = False
     name_conversion: NameConversionFn | BuiltinNameConversions = "camel_to_snake"
     inline_database: bool = False
+    add_top_level_signal_aliases: bool = False
     # formatting options below
     indent: str = " " * 4
     new_lines_after_cls: int = 2
@@ -81,7 +82,7 @@ class CodegenOptions:
 def sanity_checks(database: Database, config: CodegenOptions) -> None:
     if config.enforce_snakecase:
         raise NotImplementedError
-    if not config.flatten_signals_tree or config.prefix_signal_names_with_msg:
+    if not config.flatten_signals_tree or config.prefix_alias_names_with_msg:
         return
     signal_names: dict[str, str] = {}
     for msg in database.messages:
@@ -174,7 +175,8 @@ def _generate_signal_fields(signals: Iterable[Signal], config: CodegenOptions) -
         yield (
             f"{config.convert_name(sig.name)}: {sig_type_annotation}"
             f" =  field(default_factory="
-            f'SignalContainer.get_factory(struct.get_signal_by_name("{sig.name}")))'
+            "SignalContainer.get_factory("
+            f'struct.get_signal_by_name("{sig.name}"), {sig_type.__name__}))'
         )
 
 
@@ -208,18 +210,36 @@ def generate_dataclasses(
 
 def _generate_node(
     node_name: str,
-    message_cls_names: Iterable[str],
+    database: Database,
     config: CodegenOptions,
 ) -> Iterator[str]:
     yield "@dataclass"
     yield f"class {node_name}:"
-    for msg_name in message_cls_names:
+    for msg in database.messages:
+        msg_name = msg.name
         cls_name = config.convert_name(msg_name, is_type=True)
         field_name = config.convert_name(msg_name)
         cls_type_annotation = f'Annotated[{cls_name}, "{msg_name}"]'
         yield (
             f"{config.indent}{field_name}: {cls_type_annotation} = field(default_factory={cls_name})"
         )
+    if not config.add_top_level_signal_aliases:
+        return
+    # note: relying on sanity checks for detecting name collision
+    for msg in database.messages:
+        for signal in msg.signals:
+            sig_type = _find_signal_type(signal)
+            signal_name = config.convert_name(signal.name)
+            msg_name = config.convert_name(msg.name)
+            prop_name = (
+                f"{msg_name}_{signal_name}" if config.prefix_alias_names_with_msg else signal_name
+            )
+            yield f"{config.indent}@cached_property"
+            yield (
+                f"{config.indent}def {prop_name}(self) -> "
+                f"{SignalContainer.__name__}[{sig_type.__name__}]:"
+            )
+            yield f"{2 * config.indent}return self.{msg_name}.{signal_name}"
 
 
 def _generate_main(config: CodegenOptions, node_cls_name: str) -> Iterator[str]:
@@ -252,6 +272,8 @@ def build_module(
         "from cantools.database import Message  # noqa: TC002",
     ]
     lines.extend(config.add_gap_after_cls())
+    if config.add_top_level_signal_aliases:
+        lines.append("from functools import cached_property")
 
     db_var_name = "DB" if database_path is None else config.convert_name(database_path.stem).upper()
     if config.inline_database:
@@ -277,7 +299,7 @@ def build_module(
         lines.extend(msg_dataclass_def)
         lines.extend(config.add_gap_after_cls())
 
-    lines.extend(_generate_node(node_name, msg_cls_map.keys(), config))
+    lines.extend(_generate_node(node_name, database, config))
     lines.append("")
     if config.generate_main:
         lines.extend(_generate_main(config, node_name))

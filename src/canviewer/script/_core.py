@@ -14,6 +14,7 @@ import warnings
 from asyncio import Future
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, is_dataclass
+from enum import Enum, auto
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -247,13 +248,22 @@ class SignalContainer[T: SignalValue]:
     def __repr__(self) -> str:
         return str(self.value)
 
+    def __hash__(self) -> int:
+        return hash((id(self), self.struct))
+
     @classmethod
     def from_signal(cls, signal: Signal) -> SignalContainer[SignalValue]:
         return SignalContainer(find_sound_default(signal), struct=signal)
 
     @classmethod
-    def get_factory(cls, signal: Signal) -> Callable[[], SignalContainer[SignalValue]]:
-        return partial(SignalContainer, find_sound_default(signal), signal)
+    def get_factory(
+        cls,
+        signal: Signal,
+        expected_type: type[T],
+    ) -> Callable[[], SignalContainer[T]]:
+        default_value = find_sound_default(signal)
+        assert isinstance(default_value, expected_type)
+        return partial(SignalContainer, default_value, signal)
 
     def update(self, new_value: T, timestamp: float | None = None) -> None:
         timestamp = timestamp or time.time()
@@ -350,3 +360,25 @@ class SignalContainer[T: SignalValue]:
 
     def __ge__(self, other: float) -> Future[T]:
         return self.wait_condition(Greater(other, strict=False))
+
+
+class SendPolicy(Enum):
+    """
+    Whether a given message should be sent and how it should be handled.
+
+    INACTIVE: message's not being sent at all (e.g., RX message),
+    explicit sends will trigger a warning.
+
+    EXPLICIT: message will only be sent when explicity called by the script,
+    main difference with `INACTIVE` is that it won't issue a warning.
+
+    CYCLIC: sends the message periodically, according the cycle time defined
+    in the message struct.
+
+    ON_CHANGE: sends the message only when one of the signal value is changed.
+    """
+
+    INACTIVE = auto()
+    EXPLICIT = auto()
+    CYCLIC = auto()
+    ON_CHANGE = auto()
