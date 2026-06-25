@@ -20,8 +20,8 @@ from typing import (
     NamedTuple,
     Protocol,
     Self,
-    cast,
     get_type_hints,
+    overload,
 )
 
 from cantools.database.namedsignalvalue import NamedSignalValue
@@ -168,50 +168,56 @@ class Tolerance(NamedTuple):
         return obtained >= lower_bound and obtained <= upper_bound
 
 
-class Condition[T](Protocol):
-    def is_met(self, value: T) -> bool: ...
+class Condition(Protocol):
+    def is_met(self, value: SignalValue) -> bool: ...
 
 
 @dataclass
-class Equal[T]:
-    expected: T
+class Equal:
+    expected: SignalValue
 
-    def is_met(self, value: T) -> bool:
+    def is_met(self, value: SignalValue) -> bool:
         return self.expected == value
 
 
 @dataclass
-class AlmostEqual[T: int | float]:
-    expected: T
+class AlmostEqual:
+    expected: int | float
     tolerance: Tolerance = field(default_factory=Tolerance)
 
-    def is_met(self, value: T) -> bool:
+    def is_met(self, value: SignalValue) -> bool:
+        if not isinstance(value, (int, float)):
+            return False
         return self.tolerance.almost_equal(self.expected, value)
 
 
 @dataclass
-class DifferentThan[T]:
-    value: T
+class DifferentThan:
+    value: SignalValue
 
-    def is_met(self, value: T) -> bool:
+    def is_met(self, value: SignalValue) -> bool:
         return self.value != value
 
 
 @dataclass
-class LesserThan[T: int | float]:
-    value: T
+class LesserThan:
+    value: int | float
     strict: bool = False
 
-    def is_met(self, value: T) -> bool:
+    def is_met(self, value: SignalValue) -> bool:
+        if not isinstance(value, (int, float)):
+            return False
         return value < self.value if self.strict else value <= self.value
 
 
 @dataclass
-class Greater[T: int | float]:
-    value: T
+class Greater:
+    value: int | float
     strict: bool = False
 
-    def is_met(self, value: T) -> bool:
+    def is_met(self, value: SignalValue) -> bool:
+        if not isinstance(value, (int, float)):
+            return False
         return value > self.value if self.strict else value >= self.value
 
 
@@ -226,7 +232,7 @@ class Waiter[T](NamedTuple):
     """
 
     future: Future[T]
-    condition: Condition[T] | None = None
+    condition: Condition | None = None
 
 
 @dataclass
@@ -242,14 +248,12 @@ class SignalContainer[T: SignalValue]:
         return str(self.value)
 
     @classmethod
-    def from_signal(cls, signal: Signal) -> Self:
-        default_value = cast("T", find_sound_default(signal))
-        return cls(default_value, struct=signal)
+    def from_signal(cls, signal: Signal) -> SignalContainer[SignalValue]:
+        return SignalContainer(find_sound_default(signal), struct=signal)
 
     @classmethod
-    def get_factory(cls, signal: Signal) -> Callable[[], Self]:
-        default_value = cast("T", find_sound_default(signal))
-        return partial(cls, default_value, signal)
+    def get_factory(cls, signal: Signal) -> Callable[[], SignalContainer[SignalValue]]:
+        return partial(SignalContainer, find_sound_default(signal), signal)
 
     def update(self, new_value: T, timestamp: float | None = None) -> None:
         timestamp = timestamp or time.time()
@@ -266,22 +270,25 @@ class SignalContainer[T: SignalValue]:
         for waiter in done_watchers:
             self._watchers.remove(waiter)
 
-    def wait_next(self, future: Future[T] | None = None) -> Future[T]:
+    def wait_condition(
+        self,
+        condition: Condition | None,
+        future: Future[T] | None = None,
+    ) -> Future[T]:
         future = future or Future()
-        self._watchers.append(Waiter(future))
+        if condition is not None and condition.is_met(self.value):
+            future.set_result(self.value)
+        else:
+            waiter = Waiter(future, condition)
+            self._watchers.append(waiter)
         return future
 
+    def wait_next(self, future: Future[T] | None = None) -> Future[T]:
+        return self.wait_condition(None, future)
+
     def wait_change(self, future: Future[T] | None = None) -> Future[T]:
-        future = future or Future()
-        # note: if we never received that signal,
-        # the first received should trigger this as well
-        self._watchers.append(
-            Waiter(
-                future,
-                condition=DifferentThan(self.value) if self.last_seen is not None else None,
-            ),
-        )
-        return future
+        condition = DifferentThan(self.value) if self.last_seen is not None else None
+        return self.wait_condition(condition, future)
 
     async def wait_until(
         self,
@@ -293,10 +300,7 @@ class SignalContainer[T: SignalValue]:
         -------
         converter.state.wait_until("DC_Ready")
         """
-        future = future or Future()
-        waiter = Waiter(future, Equal(value))
-        self._watchers.append(waiter)
-        return future
+        return self.wait_condition(Equal(value), future)
 
     async def wait_until_approximately(
         self,
@@ -311,9 +315,38 @@ class SignalContainer[T: SignalValue]:
         converter.state.wait_until("DC_Ready")
         """
         tolerance = Tolerance.from_values(margin_relative, margin_absolute)
-        future = future or Future()
         if not isinstance(value, (int, float)):
             raise TypeError("Signal is not numeric, cannot use approximation")
-        waiter = Waiter(future, AlmostEqual(value, tolerance))  # type: ignore[misc]
-        self._watchers.append(waiter)
-        return future
+        return self.wait_condition(AlmostEqual(value, tolerance), future)
+
+    @overload  # type: ignore[override]
+    def __eq__(self, other: SignalContainer[SignalValue]) -> bool: ...
+    @overload
+    def __eq__(self, other: SignalValue) -> Future[T]: ...
+    def __eq__(self, other: object) -> bool | Future[T]:
+        if isinstance(other, SignalContainer):
+            return object.__eq__(self, other)
+        assert isinstance(other, (int, float, str))
+        return self.wait_condition(Equal(other))
+
+    @overload  # type: ignore[override]
+    def __ne__(self, other: SignalContainer[SignalValue]) -> bool: ...
+    @overload
+    def __ne__(self, other: SignalValue) -> Future[T]: ...
+    def __ne__(self, other: object) -> bool | Future[T]:
+        if isinstance(other, SignalContainer):
+            return object.__ne__(self, other)
+        assert isinstance(other, (int, float, str))
+        return self.wait_condition(DifferentThan(other))
+
+    def __lt__(self, other: float) -> Future[T]:
+        return self.wait_condition(LesserThan(other, strict=True))
+
+    def __le__(self, other: float) -> Future[T]:
+        return self.wait_condition(LesserThan(other, strict=False))
+
+    def __gt__(self, other: float) -> Future[T]:
+        return self.wait_condition(Greater(other, strict=True))
+
+    def __ge__(self, other: float) -> Future[T]:
+        return self.wait_condition(Greater(other, strict=False))
