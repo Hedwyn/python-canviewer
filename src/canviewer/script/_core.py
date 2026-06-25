@@ -11,15 +11,17 @@ from __future__ import annotations
 import asyncio
 import time
 import warnings
-from asyncio import Future
-from contextlib import asynccontextmanager
+from asyncio import Future, Task
+from collections.abc import Coroutine
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import Field, dataclass, field, fields, is_dataclass
 from enum import Enum, auto
 from functools import partial
-from typing import (
+from typing import (  # noqa: UP035
     TYPE_CHECKING,
     Any,
     ClassVar,
+    ContextManager,
     NamedTuple,
     Protocol,
     Self,
@@ -34,16 +36,16 @@ from cantools.database.can import Message as Frame  # noqa: TC002
 from cantools.database.namedsignalvalue import NamedSignalValue
 from typing_extensions import TypeForm
 
-from canviewer import async_bus_poller, find_sound_default
+from canviewer import async_bus_poller, autobus, find_sound_default
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Iterator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 
     from _typeshed import DataclassInstance
     from can.bus import BusABC
     from cantools.database.can.signal import Signal
 
-    from canviewer._jsonify import CanBasicTypes
+    from canviewer import CanBasicTypes
 
 type SignalValue = int | float | str
 
@@ -135,6 +137,20 @@ async def run_dispatcher(
             signal_container.update(value)
 
 
+def _start_sender_tasks(
+    bus: BusABC,
+    interface: CanInterface[str],
+) -> list[Task[None]]:
+    """
+    Shall only be used in async context.
+    """
+    return [
+        asyncio.create_task(send_periodically(bus, message))
+        for message in interface.messages
+        if message.send_policy == SendPolicy.CYCLIC
+    ]
+
+
 @asynccontextmanager
 async def monitor[T: CanInterface[str]](
     bus: BusABC,
@@ -144,16 +160,95 @@ async def monitor[T: CanInterface[str]](
     signal_map = get_signal_map(interface)
     database = interface.database
     with bus:
-        senders = [
-            asyncio.create_task(send_periodically(bus, message))
-            for message in interface.messages
-            if message.send_policy == SendPolicy.CYCLIC
-        ]
+        senders = _start_sender_tasks(bus, interface)
         dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map, mask=mask))
         yield interface
         for sender in senders:
             sender.cancel()
         dispatcher_task.cancel()
+
+
+type PilotFn[T: CanInterface[str]] = Callable[[T, Pilot[T]], Coroutine[None, None, None]]
+
+
+@dataclass
+class Pilot[T: CanInterface[str]]:
+    """
+    Sets up a CAN interface with automatic bus management.
+
+    Usable as an async context manager or as a decorator on async functions.
+
+    Parameters
+    ----------
+    interface_cls : type[CanInterface[str]]
+        The interface class to instantiate
+    bus : BusABC | None
+        The CAN bus to use. If None, creates one using autobus()
+    node : str | None
+        Node selector to set on the interface
+
+    Examples
+    --------
+    As a context manager:
+        async with Pilot(MyInterface, bus=bus, node="NodeA") as iface:
+            ...
+
+    As a decorator:
+        @Pilot(MyInterface, node="NodeA")
+        async def test_something(iface):
+            ...
+    """
+
+    interface_cls: type[T]
+    use_bus: BusABC | None = None
+    node: str | None = None
+    channel: str | None = None
+    interface: str | None = None
+
+    @property
+    def bus(self) -> BusABC:
+        if self.use_bus is None:
+            raise RuntimeError("Bus not initialized. Ensure context manager is entered.")
+        return self.use_bus
+
+    @asynccontextmanager
+    async def run(self) -> AsyncGenerator[T]:
+        # Set up bus
+        bus = self.use_bus or autobus(channel=self.channel, interface=self.interface)
+        bus_context: ContextManager[object] = (
+            self.use_bus if self.use_bus is not None else nullcontext(self.use_bus)
+        )
+        # Lazy approach: if same pilot object is used in multiple places
+        # the bus is only initialized once
+        # better for PCAN/Windows which does not support concurrency
+        self.use_bus = bus
+
+        # Create interface
+        interface = self.interface_cls()
+        if (node := self.node) is not None:
+            interface.node = node
+
+        # Set up monitoring
+        database = interface.database
+        signal_map = get_signal_map(interface)
+
+        with bus_context:
+            senders = _start_sender_tasks(bus, interface)
+            dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map))
+
+            yield interface
+            dispatcher_task.cancel()
+            for sender in senders:
+                sender.cancel()
+
+    def __call__(self, func: PilotFn[T]) -> Callable[[], Coroutine[None, None, None]]:
+        """Allow usage as a decorator."""
+
+        async def wrapper() -> None:
+            async with self.run() as iface:
+                return await func(iface, self)
+
+        return wrapper
 
 
 class Tolerance(NamedTuple):
