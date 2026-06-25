@@ -21,6 +21,7 @@ from ._codegen import (
 )
 from ._core import (
     AlmostEqual,
+    CanInterface,
     Condition,
     DifferentThan,
     Equal,
@@ -40,6 +41,7 @@ from ._core import (
 __all__ = [
     "AlmostEqual",
     "BuiltinNameConversions",
+    "CanInterface",
     "CodegenOptions",
     "Condition",
     "DifferentThan",

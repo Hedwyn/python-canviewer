@@ -22,7 +22,7 @@ from typing import (
 import cantools.database
 from cantools.database.can import Database
 
-from ._core import MessageMixin, SignalContainer
+from ._core import CanInterface, MessageMixin, SignalContainer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -214,7 +214,9 @@ def _generate_node(
     config: CodegenOptions,
 ) -> Iterator[str]:
     yield "@dataclass"
-    yield f"class {node_name}:"
+    yield f"class {node_name}({CanInterface.__name__}):"
+    db_name = config.convert_name(node_name).upper()
+    yield f"{config.indent}database = {db_name}"
     for msg in database.messages:
         msg_name = msg.name
         cls_name = config.convert_name(msg_name, is_type=True)
@@ -268,7 +270,7 @@ def build_module(
         "from typing import Annotated, ClassVar\n",
         "import cantools.database\n",
         "from cantools.database.can import Database",
-        "from canviewer.script import SignalContainer, MessageMixin",
+        "from canviewer.script import SignalContainer, MessageMixin, CanInterface",
         "from cantools.database import Message  # noqa: TC002",
     ]
     lines.extend(config.add_gap_after_cls())

@@ -13,7 +13,7 @@ import time
 import warnings
 from asyncio import Future
 from contextlib import asynccontextmanager
-from dataclasses import Field, dataclass, field, is_dataclass
+from dataclasses import Field, dataclass, field, fields, is_dataclass
 from enum import Enum, auto
 from functools import partial
 from typing import (
@@ -29,7 +29,8 @@ from typing import (
 )
 
 from can import Message
-from cantools.database.can import Message as Frame
+from cantools.database.can import Database  # noqa: TC002
+from cantools.database.can import Message as Frame  # noqa: TC002
 from cantools.database.namedsignalvalue import NamedSignalValue
 from typing_extensions import TypeForm
 
@@ -40,7 +41,6 @@ if TYPE_CHECKING:
 
     from _typeshed import DataclassInstance
     from can.bus import BusABC
-    from cantools.database.can import Database
     from cantools.database.can.signal import Signal
 
     from canviewer._jsonify import CanBasicTypes
@@ -391,9 +391,10 @@ class SignalContainer[T: SignalValue]:
         return self.wait_condition(Greater(other, strict=False))
 
 
+@dataclass
 class MessageMixin:
-    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
     struct: Frame
+    send_policy: SendPolicy = SendPolicy.INACTIVE
 
     @classmethod
     def get_type_hints(cls) -> dict[str, TypeForm[object]]:
@@ -415,3 +416,31 @@ class MessageMixin:
                 data=self.struct.encode(payload),
             ),
         )
+
+
+class CanInterface[T: str]:
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+    database: ClassVar[Database]
+    _node: T | None = None
+
+    @property
+    def messages(self) -> Iterator[MessageMixin]:
+        for f in fields(self):
+            if isinstance(message := getattr(self, f.name), MessageMixin):
+                yield message
+
+    @property
+    def node(self) -> T | None:
+        return self._node
+
+    @node.setter
+    def node(self, value: T) -> None:
+        if self._node == value:
+            return
+        for msg in self.messages:
+            cycle_time = msg.struct.cycle_time
+            if value in msg.struct.senders:
+                msg.send_policy = SendPolicy.INACTIVE
+                continue
+            msg.send_policy = SendPolicy.CYCLIC if cycle_time else SendPolicy.ON_CHANGE
+        self._node = value
