@@ -10,25 +10,23 @@ from __future__ import annotations
 import json
 import logging
 
-from cantools.database.diagnostics import data
 import click
+from cantools.database.diagnostics import data
 
 from canviewer._monitor import (
     NamedDatabase,
     get_platform_default_channel,
     get_platform_default_driver,
 )
-from canviewer.tui._interface import Backend, CanViewer, DatabaseStore, WidgetDispatcher
 from canviewer._persistency import load_databases
+from canviewer.tui._interface import Backend, CanViewer, DatabaseStore, WidgetDispatcher
 
 
 @click.command()
 @click.argument("databases", nargs=-1, type=str)
 @click.option("-c", "--channel", type=str, help="CAN channel to run on", default=None)
 @click.option("-i", "--interface", type=str, help="CAN channel to run on", default=None)
-def canviewer_tui(
-    *, databases: tuple[str], channel: str | None, interface: str | None
-) -> None:
+def canviewer_tui(*, databases: tuple[str], channel: str | None, interface: str | None) -> None:
     """
     Starts the Terminal User Interface.
     """

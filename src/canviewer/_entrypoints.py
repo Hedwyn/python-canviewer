@@ -46,8 +46,8 @@ from ._monitor import (
     get_platform_default_channel,
     get_platform_default_driver,
 )
+from ._player import DumpParseError, parse_candump, replay
 from ._utils import CanIdPattern, InvalidPattern, convert_pattern_to_mask
-from ._player import parse_candump, replay, DumpParseError
 
 _logger = logging.getLogger(__name__)
 
@@ -124,10 +124,7 @@ class UserInterface:
                     self.log = f"[red]Unknown command: {command}"
 
     def page_indication(self) -> str:
-        return (
-            f"Page {self.page_index + 1}/{self.total_pages}"
-            " (Press enter go to next page)"
-        )
+        return f"Page {self.page_index + 1}/{self.total_pages} (Press enter go to next page)"
 
 
 async def _canviewer(
@@ -168,12 +165,7 @@ async def _canviewer(
 
     def on_snapshot() -> Ok[None]:
         dict_data = message_table.take_snapshot()
-        fname = (
-            "snapshot_canviewer_"
-            + started.strftime("%Y_%m_%d_%H_%M_%S")
-            + "."
-            + snapshot_type
-        )
+        fname = "snapshot_canviewer_" + started.strftime("%Y_%m_%d_%H_%M_%S") + "." + snapshot_type
         now = time.time()
         if not os.path.exists(fname) and snapshot_type == "csv":
             with open(fname, "w+") as f:
@@ -221,15 +213,11 @@ async def _canviewer(
                         page_width, page_height
                     )
                     if single_message is not None:
-                        renderable_table = message_table.export_single_message(
-                            single_message
-                        )
+                        renderable_table = message_table.export_single_message(single_message)
                         if renderable_table is None:
                             continue
                     else:
-                        renderable_table = message_table.export_paginated(
-                            interface.page_index
-                        )
+                        renderable_table = message_table.export_paginated(interface.page_index)
 
                     plots = []
                     for message_signal in plot_signals:
@@ -287,9 +275,7 @@ def collect_databases(*paths: str) -> Iterator[str]:
 
 
 @click.command()
-@click.option(
-    "-c", "--channel", default=None, type=str, help="Name of the CAN channel to monitor"
-)
+@click.option("-c", "--channel", default=None, type=str, help="Name of the CAN channel to monitor")
 @click.option(
     "-d",
     "--driver",
@@ -422,9 +408,7 @@ def canviewer(
             case Err(error):
                 click.echo(str(error))
                 return
-    converted_filters: list[int | str] = [
-        int(f) if f.isnumeric() else f for f in filters
-    ]
+    converted_filters: list[int | str] = [int(f) if f.isnumeric() else f for f in filters]
     asyncio.run(
         _canviewer(
             channel,
@@ -632,9 +616,7 @@ def canviewer_jsonify(
                 pyperclip.copy(tmp)
                 rich.print("[green]> Path has been copied to your clipboard ! ")
             except Exception as exc:
-                _logger.error(
-                    "Failed to copy tmp path to clipboard: %s", exc, exc_info=True
-                )
+                _logger.error("Failed to copy tmp path to clipboard: %s", exc, exc_info=True)
             model.start_inotify_watcher(bus, on_error=report_error)
             if disable_rx:
                 input("Press any key to cleanup temp files and exit...")
@@ -704,9 +686,7 @@ def can_player(
         click.echo(f"Could not find {candump}")
         sys.exit(1)
     try:
-        messages = list(
-            parse_candump(candump.read_text().split("\n"), is_stdout=is_from_stdout)
-        )
+        messages = list(parse_candump(candump.read_text().split("\n"), is_stdout=is_from_stdout))
     except DumpParseError as exc:
         click.echo(f"Failed to parse candump: {exc}")
         sys.exit(1)

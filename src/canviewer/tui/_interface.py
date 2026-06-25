@@ -95,9 +95,7 @@ theme_retro = Theme(
 )
 TCSS_PATH = Path(__file__).parent / "canviewer.tcss"
 
-HISTORY_REFRESH_PERIOD = (
-    1.0  # seconds, how much time before refreshing message count history
-)
+HISTORY_REFRESH_PERIOD = 1.0  # seconds, how much time before refreshing message count history
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Task
 
@@ -331,9 +329,7 @@ class MessageWidget(Container):
         _logger.info("Changing period to %f s", new_period_ms)
         self.period = new_period_ms
         assert self.id is not None
-        self.post_message(
-            MessagePeriodChanged(MessageID.from_identifier(self.id), new_period)
-        )
+        self.post_message(MessagePeriodChanged(MessageID.from_identifier(self.id), new_period))
 
     @on(Button.Pressed)
     def on_send_pressed(self, _: Button.Pressed) -> None:
@@ -362,9 +358,7 @@ class MessageWidget(Container):
                 yield Digits(value=f"{self.count}")
                 if self.measured_period:
                     period_hint = (
-                        f"(expected: {self.period:.1f})"
-                        if self.period is not None
-                        else ""
+                        f"(expected: {self.period:.1f})" if self.period is not None else ""
                     )
                     yield Centered(content=f"Period: {period_hint}")
                     yield Digits(value=f"{1000 * self.measured_period:.1f}")
@@ -418,15 +412,9 @@ class SignalWidget(Container):
     def get_value_widget(self) -> Iterator[Widget]:
         properties = self.properties
         value = self.current_value
-        is_int = (
-            properties.signal_type is int
-            if properties is not None
-            else isinstance(value, int)
-        )
+        is_int = properties.signal_type is int if properties is not None else isinstance(value, int)
         is_float = (
-            properties.signal_type is float
-            if properties is not None
-            else isinstance(value, float)
+            properties.signal_type is float if properties is not None else isinstance(value, float)
         )
         if is_int:
             assert isinstance(value, int), value
@@ -779,8 +767,7 @@ class WidgetDispatcher:
             if (msg := db.get_message_by_name(message_name)) is not None:
                 return msg, db
         raise ValueError(
-            f"Message named {message_name} was queried internally "
-            "but not found in any DB"
+            f"Message named {message_name} was queried internally but not found in any DB"
         )
 
     def _find_message(self, message_name: str) -> CanFrame:
@@ -799,9 +786,7 @@ class WidgetDispatcher:
                 for signal in message.signals:
                     key = f"{message.name}:{signal.name}"
                     output[key] = {
-                        "properties": asdict(
-                            extract_signal_properties(signal, *message.senders)
-                        ),
+                        "properties": asdict(extract_signal_properties(signal, *message.senders)),
                     }
 
         return output
@@ -825,9 +810,7 @@ class WidgetDispatcher:
         widget.current_value = value
         widget.properties = properties
         _logger.info("Setting signal %s to value %s", signal.name, value)
-        return NamedSignalWidget(
-            signal_id=signal_id, widget=widget, properties=properties
-        )
+        return NamedSignalWidget(signal_id=signal_id, widget=widget, properties=properties)
 
 
 type MessageCallback = Callable[[DecodedMessage], None]
@@ -959,9 +942,7 @@ class Backend:
         if not send_now:
             return
         frame = self._database_store.find_message(signal_id.message, signal_id.db_name)
-        payload = can.Message(
-            arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
-        )
+        payload = can.Message(arbitration_id=frame.frame_id, data=frame.encode(msg_dict))
         _logger.info("Sending %s", payload)
         self.monitor.bus.send(payload)
 
@@ -974,15 +955,11 @@ class Backend:
         if interval is None:
             assert frame.cycle_time is not None
             interval = frame.cycle_time / 1000
-        assert interval is not None, (
-            "Cannot send a message without specifying an interval"
-        )
+        assert interval is not None, "Cannot send a message without specifying an interval"
         try:
             while True:
                 msg_dict = self._messages[frame]
-                payload = can.Message(
-                    arbitration_id=frame.frame_id, data=frame.encode(msg_dict)
-                )
+                payload = can.Message(arbitration_id=frame.frame_id, data=frame.encode(msg_dict))
                 _logger.info("Sending %s, next is %f", payload, interval)
                 self.monitor.bus.send(payload)
                 await asyncio.sleep(interval)
@@ -1016,9 +993,7 @@ class CanViewer(App[None]):
 
     show_hidden_messages: Reactive[bool] = reactive(False)
     CSS_PATH: ClassVar[str] = str(TCSS_PATH)
-    loaded_databases: Reactive[tuple[NamedDatabase, ...]] = reactive(
-        tuple, recompose=True
-    )
+    loaded_databases: Reactive[tuple[NamedDatabase, ...]] = reactive(tuple, recompose=True)
 
     def __init__(
         self,
@@ -1035,9 +1010,7 @@ class CanViewer(App[None]):
         self._config = config or TUIConfig()
         self._backend = backend
         self._dispatcher = dispatcher or WidgetDispatcher(backend._database_store)
-        self._producers: dict[
-            str, str | None
-        ] = {}  # maps each database to its selected producer
+        self._producers: dict[str, str | None] = {}  # maps each database to its selected producer
         self._signal_properties: dict[
             SignalID, SignalProperties
         ] = {}  # maps each SignalWidget ID to its properties
@@ -1151,9 +1124,7 @@ class CanViewer(App[None]):
             self._signal_properties[signal_id] = properties
             # checking that we can retrive
             assert (
-                self._signal_properties.get(
-                    SignalID.from_identifier(signal_id.identifier)
-                )
+                self._signal_properties.get(SignalID.from_identifier(signal_id.identifier))
                 is not None
             )
 
@@ -1166,9 +1137,7 @@ class CanViewer(App[None]):
         with Horizontal(id="main-controls"):
             if db_options:
                 yield Centered("Databases")
-                yield Select(
-                    id="database-selection", options=db_options, value=db_select_value
-                )
+                yield Select(id="database-selection", options=db_options, value=db_select_value)
                 yield Button(label="Load", id="load-database")
             yield Centered(content="Activate Senders")
             yield Switch(
@@ -1237,11 +1206,7 @@ class CanViewer(App[None]):
         yield from self._compose_main_controls_panel()
 
         def db_collapsible() -> ContextManager:
-            return (
-                Collapsible()
-                if self._config.collapse_database
-                else contextlib.nullcontext()
-            )
+            return Collapsible() if self._config.collapse_database else contextlib.nullcontext()
 
         for db in self.loaded_databases:
             # for db in self._backend.database_store:
@@ -1299,9 +1264,7 @@ class CanViewer(App[None]):
         a message is received.
         """
         _logger.info("Dispatching messages values %s", decoded_msg)
-        frame, db = self._backend.database_store.find_message_and_db(
-            decoded_msg.frame_name
-        )
+        frame, db = self._backend.database_store.find_message_and_db(decoded_msg.frame_name)
         msg_id = MessageID(db.name, frame.name)
         try:
             msg_widget = self.query_one(msg_id.query_key, MessageWidget)
@@ -1345,9 +1308,7 @@ class CanViewer(App[None]):
 
     @on(SignalValueChanged)
     def on_signal_value_changed(self, event: SignalValueChanged) -> None:
-        _logger.info(
-            "Modifying displayed signal %s value to %s", event.signal_id, event.value
-        )
+        _logger.info("Modifying displayed signal %s value to %s", event.signal_id, event.value)
 
     @on(SendRequest)
     def on_send_request(self, event: SendRequest) -> None:
@@ -1357,18 +1318,14 @@ class CanViewer(App[None]):
         # period case
         # TODO: move this logic to backend
         msg_id = event.message_id
-        frame = self._backend.database_store.find_message(
-            msg_id.message, msg_id.db_name
-        )
+        frame = self._backend.database_store.find_message(msg_id.message, msg_id.db_name)
         self._backend.start_periodic_message_task(frame, event.period)
 
     @on(StopSender)
     def on_stop_sender(self, event: StopSender) -> None:
         # TODO: move this logic to backend
         msg_id = event.message_id
-        frame = self._backend.database_store.find_message(
-            msg_id.message, msg_id.db_name
-        )
+        frame = self._backend.database_store.find_message(msg_id.message, msg_id.db_name)
         self._backend.stop_periodic_message_task(frame)
 
     @on(MessagePeriodChanged)
@@ -1376,15 +1333,11 @@ class CanViewer(App[None]):
         _logger.info("Message period changed %s", event)
         # TODO: move this logic to backend
         msg_id = event.message_id
-        frame = self._backend.database_store.find_message(
-            msg_id.message, msg_id.db_name
-        )
+        frame = self._backend.database_store.find_message(msg_id.message, msg_id.db_name)
         # Keep the collapsible's sender toggle in sync with the new period (ms),
         # so toggling it on later uses the user-set value.
         try:
-            collapsible = self.query_one(
-                f"#{msg_id.identifier}-collapsible", MessageCollapsible
-            )
+            collapsible = self.query_one(f"#{msg_id.identifier}-collapsible", MessageCollapsible)
             collapsible.period = event.period * 1000
         except NoMatches:
             pass
@@ -1463,9 +1416,7 @@ class CanViewer(App[None]):
                 pass
 
     @on(UpdateSignalMonitoringStatus)
-    def on_signal_monitoring_status_changed(
-        self, event: UpdateSignalMonitoringStatus
-    ) -> None:
+    def on_signal_monitoring_status_changed(self, event: UpdateSignalMonitoringStatus) -> None:
         is_monitored = event.monitored
         if is_monitored:
             self._monitored_signals.add(event.signal_widget)
@@ -1514,8 +1465,6 @@ class CanViewer(App[None]):
                 continue
             assert isinstance(widget, SignalWidget)
             widget.is_tx = is_tx
-            msg_widget = self.query_one(
-                signal_id.get_message_id().query_key, MessageWidget
-            )
+            msg_widget = self.query_one(signal_id.get_message_id().query_key, MessageWidget)
             if msg_widget.is_tx != is_tx:
                 msg_widget.is_tx = is_tx

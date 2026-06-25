@@ -110,9 +110,7 @@ class Slider[T: (int, float)](Widget, can_focus=True):
         self.value_type: type[T] = value_type
         self.resolution = resolution or DEFAULT_RESOLUTION
         self.value = value if value is not None else min
-        self._slider_position = (
-            (self.value - self.min) / (self.resolution / VSIZE)
-        ) / self.step
+        self._slider_position = ((self.value - self.min) / (self.resolution / VSIZE)) / self.step
 
     @property
     def range(self) -> T:
@@ -172,9 +170,7 @@ class Slider[T: (int, float)](Widget, can_focus=True):
         step_ratio = ceil(VSIZE / self.resolution)
         thumb_size = max(1, step_ratio / (VSIZE / self.content_size.width))
 
-        self._slider_position = (
-            (mouse_x - (thumb_size // 2)) / self.content_size.width
-        ) * VSIZE
+        self._slider_position = ((mouse_x - (thumb_size // 2)) / self.content_size.width) * VSIZE
 
         self._grabbed = event.screen_offset
         self.action_grab()
@@ -213,10 +209,7 @@ class Slider[T: (int, float)](Widget, can_focus=True):
             self._slider_position = self._grabbed_position + (
                 mouse_move * (VSIZE / self.content_size.width)
             )
-            value = (
-                self.step * round(self._slider_position * (self.resolution / VSIZE))
-                + self.min
-            )
+            value = self.step * round(self._slider_position * (self.resolution / VSIZE)) + self.min
             self.value = value if self.is_float else round(value)  # type: ignore[assignment]
 
         event.stop()

@@ -13,8 +13,8 @@ import json
 import logging
 import sys
 
-from canviewer.tui._interface import Backend, CanViewer, DatabaseStore, WidgetDispatcher
 from canviewer.tui._entrypoint import canviewer_tui
+from canviewer.tui._interface import Backend, CanViewer, DatabaseStore, WidgetDispatcher
 
 if __name__ == "__main__":
     canviewer_tui()

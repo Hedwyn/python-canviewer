@@ -158,9 +158,7 @@ class DatabaseStore:
                 return db
         return None
 
-    def load_database_from_file(
-        self, path: Path, name: str | None = None
-    ) -> NamedDatabase:
+    def load_database_from_file(self, path: Path, name: str | None = None) -> NamedDatabase:
         """
         Adds the database at the given `path`, with the given `name`
         Returns the loaded database.
@@ -182,8 +180,7 @@ class DatabaseStore:
             if (msg := db.get_message_by_name(message_name)) is not None:
                 return msg, db
         raise ValueError(
-            f"Message named {message_name} was queried internally "
-            "but not found in any DB"
+            f"Message named {message_name} was queried internally but not found in any DB"
         )
 
     def find_message(self, message_name: str, db_name: str | None = None) -> CanFrame:
@@ -233,9 +230,7 @@ class DecodedMessage:
         str
             The name of the message, combining the frame name and the mux values.
         """
-        formatted_selectors = (
-            f"[{mux.name}={mux.value}]" for mux in self.mux_selectors
-        )
+        formatted_selectors = (f"[{mux.name}={mux.value}]" for mux in self.mux_selectors)
         return self.frame_name + "".join(formatted_selectors)
 
 
@@ -356,9 +351,7 @@ class CanMonitor:
                 frame = db.database.get_message_by_frame_id(
                     candidate_id, force_extended_id=msg.is_extended_id
                 )
-                decoded_data = frame.decode(
-                    msg.data, decode_choices=not self._always_show_value
-                )  # type: ignore[assignment]
+                decoded_data = frame.decode(msg.data, decode_choices=not self._always_show_value)  # type: ignore[assignment]
                 # Have to cast because cantools does not provide necessary overloads
                 # for decode -> when decode_containers is False, returned type is dict
                 decoded_data = cast(MessageDict, decoded_data)

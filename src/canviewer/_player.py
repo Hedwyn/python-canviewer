@@ -6,14 +6,14 @@ Utilities to replay candumps.
 """
 
 from __future__ import annotations
-import warnings
-import math
-from typing import Literal, Sequence
+
 import asyncio
+import math
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, overload
+from typing import Iterable, Iterator, Literal, Sequence, overload
 
 import can
 from can.message import Message
@@ -62,9 +62,7 @@ def convert_to(numeric_type: type[int], number_str: str, base: int = 10) -> int:
 def convert_to(numeric_type: type[float], number_str: str, base: int = 10) -> float: ...
 
 
-def convert_to(
-    numeric_type: type[int | float], number_str: str, base: int = 10
-) -> int | float:
+def convert_to(numeric_type: type[int | float], number_str: str, base: int = 10) -> int | float:
     """
     Tiny wrapper on top of numeric string conversions raising `NumericConversionError`
     on invalid values.
@@ -89,9 +87,7 @@ def split(string: str, expected_len: int, separator: str | None = None) -> list[
     return fields
 
 
-def parse_candump(
-    dump: Iterable[str], is_stdout: bool = False
-) -> Iterator[ReplayableMessage]:
+def parse_candump(dump: Iterable[str], is_stdout: bool = False) -> Iterator[ReplayableMessage]:
     """
     Parses a candump.
     If `is_stdout`, the format is expected to the one candump uses when
