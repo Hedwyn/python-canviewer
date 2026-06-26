@@ -106,14 +106,32 @@ async def run_dispatcher(
     bus: BusABC,
     database: Database,
     signal_map: dict[str, dict[str, SignalContainer[CanBasicTypes]]],
-    mask: int = 0xFFFF_FFFF,
+    mask: int | None = None,
+    prefix: int | None = None,
 ) -> None:
     async for next_msg in async_bus_poller(bus):
-        can_id = next_msg.arbitration_id & mask
+        can_id = next_msg.arbitration_id
+
+        # Check prefix match if specified
+        if prefix is not None and mask is not None:
+            inverted_mask = 0xFFFF_FFFF & ~mask
+            extracted_prefix = can_id & inverted_mask
+            if extracted_prefix != prefix:
+                continue
+
+        # Apply mask to get base ID for lookup
+        if mask is not None:
+            can_id = can_id & mask
+
         try:
             target_msg = database.get_message_by_frame_id(can_id)
         except KeyError:
             continue
+
+        # Check is_extended flag matches
+        if next_msg.is_extended_id != target_msg.is_extended_frame:
+            continue
+
         message_container = signal_map.get(target_msg.name)
         if message_container is None:
             warnings.warn(
@@ -144,12 +162,14 @@ async def run_dispatcher(
 def _start_sender_tasks(
     bus: BusABC,
     interface: Node[str],
+    mask: int | None = None,
+    prefix: int | None = None,
 ) -> list[Task[None]]:
     """
     Shall only be used in async context.
     """
     return [
-        asyncio.create_task(send_periodically(bus, message))
+        asyncio.create_task(send_periodically(bus, message, mask=mask, prefix=prefix))
         for message in interface.messages
         if message.send_policy == SendPolicy.CYCLIC
     ]
@@ -159,13 +179,16 @@ def _start_sender_tasks(
 async def monitor[T: Node[str]](
     bus: BusABC,
     interface: T,
-    mask: int = 0xFFFF_FFFF,
+    mask: int | None = None,
+    prefix: int | None = None,
 ) -> AsyncGenerator[T]:
     signal_map = get_signal_map(interface)
     database = interface.database
     with bus:
-        senders = _start_sender_tasks(bus, interface)
-        dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map, mask=mask))
+        senders = _start_sender_tasks(bus, interface, mask=mask, prefix=prefix)
+        dispatcher_task = asyncio.create_task(
+            run_dispatcher(bus, database, signal_map, mask=mask, prefix=prefix)
+        )
         yield interface
         for sender in senders:
             sender.cancel()
@@ -190,6 +213,10 @@ class Pilot[T: Node[str]]:
         The CAN bus to use. If None, creates one using autobus()
     node : str | None
         Node selector to set on the interface
+    mask : int | None
+        CAN ID mask for prefix filtering (optional)
+    prefix : int | None
+        CAN ID prefix for extended addressing (optional)
 
     Examples
     --------
@@ -208,6 +235,8 @@ class Pilot[T: Node[str]]:
     node: str | None = None
     channel: str | None = None
     interface: str | None = None
+    mask: int | None = None
+    prefix: int | None = None
 
     @property
     def bus(self) -> BusABC:
@@ -237,8 +266,10 @@ class Pilot[T: Node[str]]:
         signal_map = get_signal_map(interface)
 
         with bus_context:
-            senders = _start_sender_tasks(bus, interface)
-            dispatcher_task = asyncio.create_task(run_dispatcher(bus, database, signal_map))
+            senders = _start_sender_tasks(bus, interface, mask=self.mask, prefix=self.prefix)
+            dispatcher_task = asyncio.create_task(
+                run_dispatcher(bus, database, signal_map, mask=self.mask, prefix=self.prefix)
+            )
 
             yield interface
             dispatcher_task.cancel()
@@ -570,7 +601,7 @@ class MessageMixin:
     def get_type_hints(cls) -> dict[str, TypeForm[object]]:
         return get_type_hints(cls, include_extras=True)
 
-    def send_to(self, bus: BusABC) -> None:
+    def send_to(self, bus: BusABC, mask: int | None = None, prefix: int | None = None) -> None:
         payload: dict[str, CanBasicTypes] = {}
         for f_name, type_hint in self.get_type_hints().items():
             container = getattr(self, f_name)
@@ -580,9 +611,17 @@ class MessageMixin:
                 raise ValueError("Missing name annotation on signal")
             payload[signal_name] = container.value
 
+        frame_id = self.struct.frame_id
+        # Apply mask and prefix transformation
+        if mask is not None:
+            frame_id = frame_id & mask
+        if prefix is not None:
+            frame_id = frame_id | prefix
+
         bus.send(
             Message(
-                arbitration_id=self.struct.frame_id,
+                arbitration_id=frame_id,
+                is_extended_id=self.struct.is_extended_frame,
                 data=self.struct.encode(payload),
             ),
         )
@@ -610,17 +649,19 @@ class Node[T: str]:
             return
         for msg in self.messages:
             cycle_time = msg.struct.cycle_time
-            if value in msg.struct.senders:
+            if value not in msg.struct.senders:
                 msg.send_policy = SendPolicy.INACTIVE
                 continue
             msg.send_policy = SendPolicy.CYCLIC if cycle_time else SendPolicy.ON_CHANGE
         self._node_name = value
 
 
-async def send_periodically(bus: BusABC, message: MessageMixin) -> None:
+async def send_periodically(
+    bus: BusABC, message: MessageMixin, mask: int | None = None, prefix: int | None = None
+) -> None:
     if (period := message.period) is None:
         raise ValueError(f"{message} does not have a period defined")
 
     while True:
-        message.send_to(bus)
+        message.send_to(bus, mask=mask, prefix=prefix)
         await asyncio.sleep(period)
