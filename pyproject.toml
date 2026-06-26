@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling>=1.0.0", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -42,6 +42,9 @@ Source = "https://github.com/Hedwyn/python-canviewer"
 canviewer = "canviewer._entrypoints:canviewer"
 canviewer-jsonify = "canviewer._entrypoints:canviewer_jsonify"
 canviewer-player = "canviewer._entrypoints:can_player"
+
+[project.entry-points.hatch]
+canviewer-codegen = "canviewer.script.hatch"
 
 [tool.hatch.version]
 source = "vcs"
