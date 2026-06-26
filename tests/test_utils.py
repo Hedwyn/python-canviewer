@@ -6,7 +6,9 @@ Test suite for shared utilities
 """
 
 from __future__ import annotations
+
 import pytest
+
 from canviewer import CanIdPattern, convert_pattern_to_mask
 from canviewer._utils import InvalidPattern
 

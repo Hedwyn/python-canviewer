@@ -69,10 +69,12 @@ class CanviewerCodegenBuildHook(BuildHookInterface):
             self._process_target(self.config)
         else:
             assert isinstance(targets, list), "targets must be a list"
+            base_config = {k: v for k, v in self.config.items() if k != "targets"}
             for target in targets:
                 assert isinstance(target, dict), "each target must be a dictionary"
-                self._validate_config(target)
-                self._process_target(target)
+                merged = {**base_config, **target}
+                self._validate_config(merged)
+                self._process_target(merged)
 
     def _validate_config(self, config: object) -> None:
         assert isinstance(config, dict), "config must be a dictionary"
