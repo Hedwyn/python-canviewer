@@ -14,20 +14,24 @@ import platform
 from asyncio import Queue
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Iterator, Self, Union, cast
+from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 import cantools
-from can import BusABC
-from can import Message as CanMessage
 from cantools.database.can import Database as CanDatabase  # type: ignore[attr-defined]
-from cantools.database.can.message import Message as CanFrame
 from cantools.database.namedsignalvalue import NamedSignalValue
 from exhausterr import Err, Error, Ok, Result
 
 from ._utils import CanIdPattern
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from can import BusABC
+    from can import Message as CanMessage
+    from cantools.database.can.message import Message as CanFrame
+
 # type hinting
-CanTypes = Union[int, float, str, NamedSignalValue]
+CanTypes = int | float | str | NamedSignalValue
 MessageDict = dict[str, CanTypes]
 
 
@@ -168,7 +172,9 @@ class DatabaseStore:
         return new_db
 
     def find_message_and_db(
-        self, message_name: str, db_name: str | None = None
+        self,
+        message_name: str,
+        db_name: str | None = None,
     ) -> tuple[CanFrame, NamedDatabase]:
         """
         Looks for message `message_name` in all registered databases
@@ -180,7 +186,7 @@ class DatabaseStore:
             if (msg := db.get_message_by_name(message_name)) is not None:
                 return msg, db
         raise ValueError(
-            f"Message named {message_name} was queried internally but not found in any DB"
+            f"Message named {message_name} was queried internally but not found in any DB",
         )
 
     def find_message(self, message_name: str, db_name: str | None = None) -> CanFrame:
@@ -316,7 +322,9 @@ class CanMonitor:
         return self._queue
 
     def get_mux_selector_values(
-        self, frame: CanFrame, data: MessageDict
+        self,
+        frame: CanFrame,
+        data: MessageDict,
     ) -> Iterator[MuxSelectorValue]:
         """
         Returns
@@ -349,12 +357,13 @@ class CanMonitor:
         for db in self.store:
             try:
                 frame = db.database.get_message_by_frame_id(
-                    candidate_id, force_extended_id=msg.is_extended_id
+                    candidate_id,
+                    force_extended_id=msg.is_extended_id,
                 )
                 decoded_data = frame.decode(msg.data, decode_choices=not self._always_show_value)  # type: ignore[assignment]
                 # Have to cast because cantools does not provide necessary overloads
                 # for decode -> when decode_containers is False, returned type is dict
-                decoded_data = cast(MessageDict, decoded_data)
+                decoded_data = cast("MessageDict", decoded_data)
                 # checking if frame is a mux
 
                 selectors = tuple(self.get_mux_selector_values(frame, decoded_data))
@@ -363,7 +372,7 @@ class CanMonitor:
                     timestamp=msg.timestamp,
                     frame_name=frame.name,
                     binary=msg.data,
-                    data=cast(MessageDict, decoded_data),
+                    data=cast("MessageDict", decoded_data),
                     mux_selectors=selectors,
                     db_name=db.name,
                 )
