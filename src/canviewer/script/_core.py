@@ -9,18 +9,19 @@ to watch signal values and react on changes.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import warnings
 from asyncio import Future, Task
 from collections.abc import Coroutine
 from contextlib import asynccontextmanager, nullcontext
-from dataclasses import Field, dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum, auto
 from functools import partial
 from math import ceil
+from os import wait
 from typing import (  # noqa: UP035
     TYPE_CHECKING,
-    Any,
     ClassVar,
     ContextManager,
     NamedTuple,
@@ -40,7 +41,7 @@ from typing_extensions import TypeForm
 from canviewer import async_bus_poller, autobus, find_sound_default
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+    from collections.abc import AsyncGenerator, Callable, Iterator
 
     from _typeshed import DataclassInstance
     from can.bus import BusABC
@@ -52,6 +53,8 @@ type SignalValue = int | float | str
 
 _DEFAULT_TICK = 0.05
 _DEFAULT_RAMP_DURATION = 1.0
+
+_logger = logging.getLogger(__name__)
 
 
 def iter_annotations[T](type_hint: TypeForm[object], annotation_type: type[T]) -> Iterator[T]:
@@ -187,7 +190,7 @@ async def monitor[T: Node[str]](
     with bus:
         senders = _start_sender_tasks(bus, interface, mask=mask, prefix=prefix)
         dispatcher_task = asyncio.create_task(
-            run_dispatcher(bus, database, signal_map, mask=mask, prefix=prefix)
+            run_dispatcher(bus, database, signal_map, mask=mask, prefix=prefix),
         )
         yield interface
         for sender in senders:
@@ -268,7 +271,7 @@ class Pilot[T: Node[str]]:
         with bus_context:
             senders = _start_sender_tasks(bus, interface, mask=self.mask, prefix=self.prefix)
             dispatcher_task = asyncio.create_task(
-                run_dispatcher(bus, database, signal_map, mask=self.mask, prefix=self.prefix)
+                run_dispatcher(bus, database, signal_map, mask=self.mask, prefix=self.prefix),
             )
 
             yield interface
@@ -319,6 +322,9 @@ class Condition(Protocol):
 class Equal:
     expected: SignalValue
 
+    def __str__(self) -> str:
+        return f"== {self.expected}"
+
     def is_met(self, value: SignalValue) -> bool:
         return self.expected == value
 
@@ -327,6 +333,9 @@ class Equal:
 class AlmostEqual:
     expected: int | float
     tolerance: Tolerance = field(default_factory=Tolerance)
+
+    def __str__(self) -> str:
+        return f"≈ {self.expected}"
 
     def is_met(self, value: SignalValue) -> bool:
         if not isinstance(value, (int, float)):
@@ -338,6 +347,9 @@ class AlmostEqual:
 class DifferentThan:
     value: SignalValue
 
+    def __str__(self) -> str:
+        return f"!= {self.value}"
+
     def is_met(self, value: SignalValue) -> bool:
         return self.value != value
 
@@ -346,6 +358,10 @@ class DifferentThan:
 class LesserThan:
     value: int | float
     strict: bool = False
+
+    def __str__(self) -> str:
+        op = "<" if self.strict else "<="
+        return f"{op} {self.value}"
 
     def is_met(self, value: SignalValue) -> bool:
         if not isinstance(value, (int, float)):
@@ -358,13 +374,17 @@ class GreaterThan:
     value: int | float
     strict: bool = False
 
+    def __str__(self) -> str:
+        op = ">" if self.strict else ">="
+        return f"{op} {self.value}"
+
     def is_met(self, value: SignalValue) -> bool:
         if not isinstance(value, (int, float)):
             return False
         return value > self.value if self.strict else value >= self.value
 
 
-class Waiter[T](NamedTuple):
+class Hook[T](NamedTuple):
     """
     Handle coupling a future to an optional trigger condition.
     `once=True` (default): the waiter is removed after the first trigger (wait_* semantics).
@@ -404,7 +424,7 @@ class SignalContainer[T: SignalValue]:
     struct: Signal
     last_seen: float | None = None
 
-    _waiters: list[Waiter[T]] = field(default_factory=list)
+    _watchers: list[Hook[T]] = field(default_factory=list)
 
     def __repr__(self) -> str:
         return str(self.value)
@@ -431,19 +451,35 @@ class SignalContainer[T: SignalValue]:
     def update(self, new_value: T, timestamp: float | None = None) -> None:
         timestamp = timestamp or time.time()
         self.last_seen = timestamp
+        current_value = self.value
+        if new_value != current_value:
+            _logger.info(
+                "[%s] Value changed: %s |-> %s",
+                self.struct.name,
+                current_value,
+                new_value,
+            )
         self.value = new_value
 
-        done: list[Waiter[T]] = []
-        for waiter in self._waiters:
+        done: list[Hook[T]] = []
+        for waiter in self._watchers:
             future, condition, once = waiter
             if future.done():
                 continue
-            if condition is None or condition.is_met(new_value):
+
+            if condition is None:
+                should_fire = True
+            else:
+                should_fire = condition.is_met(new_value)
+                if should_fire:
+                    _logger.info("Condition reached:  %s %s", new_value, condition)
+
+            if should_fire:
                 future.set_result(new_value)
                 if once:
                     done.append(waiter)
         for waiter in done:
-            self._waiters.remove(waiter)
+            self._watchers.remove(waiter)
 
     def wait_condition(
         self,
@@ -456,7 +492,7 @@ class SignalContainer[T: SignalValue]:
         if self.last_seen is not None and condition is not None and condition.is_met(self.value):
             future.set_result(self.value)
         else:
-            self._waiters.append(Waiter(future, condition))
+            self._watchers.append(Hook(future, condition))
         return future
 
     async def ramp_to(
@@ -554,22 +590,22 @@ class SignalContainer[T: SignalValue]:
         self,
         condition: Condition | None,
         future: Future[T] | None = None,
-    ) -> Waiter[T]:
+    ) -> Hook[T]:
         future = future or Future()
-        waiter: Waiter[T] = Waiter(future, condition, once=False)
-        self._waiters.append(waiter)
+        waiter: Hook[T] = Hook(future, condition, once=False)
+        self._watchers.append(waiter)
         return waiter
 
-    def unwatch(self, waiter: Waiter[T]) -> None:
+    def unwatch(self, waiter: Hook[T]) -> None:
         try:
-            self._waiters.remove(waiter)
+            self._watchers.remove(waiter)
         except ValueError:
             pass
 
-    def watch_next(self, future: Future[T] | None = None) -> Waiter[T]:
+    def watch_next(self, future: Future[T] | None = None) -> Hook[T]:
         return self.watch_condition(None, future)
 
-    def watch_change(self, future: Future[T] | None = None) -> Waiter[T]:
+    def watch_change(self, future: Future[T] | None = None) -> Hook[T]:
         condition: DifferentThan | None = (
             DifferentThan(self.value) if self.last_seen is not None else None
         )
@@ -579,16 +615,16 @@ class SignalContainer[T: SignalValue]:
         self,
         value: T,
         future: Future[T] | None = None,
-    ) -> Waiter[T]:
+    ) -> Hook[T]:
         return self.watch_condition(Equal(value), future)
 
     def watch_until_approximately(
         self,
-        value: int | float,
+        value: float,
         future: Future[T] | None = None,
         margin_absolute: float | None = None,
         margin_relative: float | None = None,
-    ) -> Waiter[T]:
+    ) -> Hook[T]:
         tolerance = Tolerance.from_values(margin_relative, margin_absolute)
         return self.watch_condition(AlmostEqual(value, tolerance), future)
 
@@ -697,11 +733,15 @@ class Node[T: str]:
 
 
 async def send_periodically(
-    bus: BusABC, message: MessageMixin, mask: int | None = None, prefix: int | None = None
+    bus: BusABC,
+    message: MessageMixin,
+    mask: int | None = None,
+    prefix: int | None = None,
 ) -> None:
     if (period := message.period) is None:
         raise ValueError(f"{message} does not have a period defined")
 
     while True:
+        _logger.debug("Sending %s", message)
         message.send_to(bus, mask=mask, prefix=prefix)
         await asyncio.sleep(period)
