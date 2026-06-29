@@ -42,7 +42,7 @@ MAIN_TEMPLATE = """\
 @click.option("-c", "--channel", default=None, type=str, help="CAN channel (default: platform-specific)")
 @click.option("-i", "--interface", default=None, type=str, help="CAN interface/driver (default: platform-specific)")
 def main(channel: str | None, interface: str | None) -> None:
-{i}pilot = Pilot({node_cls_name}, channel=channel, interface=interface)
+{i}pilot = Pilot({node_cls_name}, channel=channel, interface=interface{node_arg})
 
 {i}async def _run() -> None:
 {i}{i}async with pilot.run():
@@ -72,6 +72,7 @@ class CodegenOptions:
     new_lines_after_cls: int = 2
     format_code: bool = False
     generate_main: bool = False
+    main_node: str | None = None
 
     def add_gap_after_cls(self) -> Iterator[str]:
         for _ in range(self.new_lines_after_cls):
@@ -279,8 +280,19 @@ def _generate_node(
             yield f"{2 * config.indent}return self.{msg_name}.{signal_name}"
 
 
-def _generate_main(config: CodegenOptions, node_cls_name: str) -> Iterator[str]:
-    yield from MAIN_TEMPLATE.format(i=config.indent, node_cls_name=node_cls_name).splitlines()
+def _generate_main(
+    config: CodegenOptions,
+    node_cls_name: str,
+    database: Database,
+) -> Iterator[str]:
+    if (node := config.main_node) is None and database.nodes:
+        node = database.nodes[0].name
+    node_arg = f', node="{node}"'
+    yield from MAIN_TEMPLATE.format(
+        i=config.indent,
+        node_cls_name=node_cls_name,
+        node_arg=node_arg,
+    ).splitlines()
 
 
 def build_module(
@@ -341,7 +353,7 @@ def build_module(
     lines.extend(_generate_node(node_name, database, config))
     lines.append("")
     if config.generate_main:
-        lines.extend(_generate_main(config, node_name))
+        lines.extend(_generate_main(config, node_name, database))
     return "\n".join(lines)
 
 
