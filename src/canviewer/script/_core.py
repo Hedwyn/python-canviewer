@@ -366,16 +366,14 @@ class GreaterThan:
 
 class Waiter[T](NamedTuple):
     """
-    A simple handle on top of a future
-    specifiying under which conditions the future should be triggered.
-    If `condition` is given, `future` shall only be triggered
-    when the signal value is equal to condition.
-    If a `tolerance` is given, almost_equal will be used
-    instead of equal using the given tolerance.
+    Handle coupling a future to an optional trigger condition.
+    `once=True` (default): the waiter is removed after the first trigger (wait_* semantics).
+    `once=False`: the waiter persists across triggers (watch_* semantics).
     """
 
     future: Future[T]
     condition: Condition | None = None
+    once: bool = True
 
 
 class SendPolicy(Enum):
@@ -406,8 +404,7 @@ class SignalContainer[T: SignalValue]:
     struct: Signal
     last_seen: float | None = None
 
-    _watchers: list[Waiter[T]] = field(default_factory=list)
-    _hooks: set[Callable[[Self], object]] = field(default_factory=set)
+    _waiters: list[Waiter[T]] = field(default_factory=list)
 
     def __repr__(self) -> str:
         return str(self.value)
@@ -436,15 +433,17 @@ class SignalContainer[T: SignalValue]:
         self.last_seen = timestamp
         self.value = new_value
 
-        done_watchers: list[Waiter[T]] = []
-        for waiter in self._watchers:
-            future, condition = waiter
-            is_met = condition is None or condition.is_met(new_value)
-            if is_met:
+        done: list[Waiter[T]] = []
+        for waiter in self._waiters:
+            future, condition, once = waiter
+            if future.done():
+                continue
+            if condition is None or condition.is_met(new_value):
                 future.set_result(new_value)
-                done_watchers.append(waiter)
-        for waiter in done_watchers:
-            self._watchers.remove(waiter)
+                if once:
+                    done.append(waiter)
+        for waiter in done:
+            self._waiters.remove(waiter)
 
     def wait_condition(
         self,
@@ -457,8 +456,7 @@ class SignalContainer[T: SignalValue]:
         if self.last_seen is not None and condition is not None and condition.is_met(self.value):
             future.set_result(self.value)
         else:
-            waiter = Waiter(future, condition)
-            self._watchers.append(waiter)
+            self._waiters.append(Waiter(future, condition))
         return future
 
     async def ramp_to(
@@ -551,6 +549,48 @@ class SignalContainer[T: SignalValue]:
         if not isinstance(value, (int, float)):
             raise TypeError("Signal is not numeric, cannot use approximation")
         return self.wait_condition(AlmostEqual(value, tolerance), future)
+
+    def watch_condition(
+        self,
+        condition: Condition | None,
+        future: Future[T] | None = None,
+    ) -> Waiter[T]:
+        future = future or Future()
+        waiter: Waiter[T] = Waiter(future, condition, once=False)
+        self._waiters.append(waiter)
+        return waiter
+
+    def unwatch(self, waiter: Waiter[T]) -> None:
+        try:
+            self._waiters.remove(waiter)
+        except ValueError:
+            pass
+
+    def watch_next(self, future: Future[T] | None = None) -> Waiter[T]:
+        return self.watch_condition(None, future)
+
+    def watch_change(self, future: Future[T] | None = None) -> Waiter[T]:
+        condition: DifferentThan | None = (
+            DifferentThan(self.value) if self.last_seen is not None else None
+        )
+        return self.watch_condition(condition, future)
+
+    def watch_until(
+        self,
+        value: T,
+        future: Future[T] | None = None,
+    ) -> Waiter[T]:
+        return self.watch_condition(Equal(value), future)
+
+    def watch_until_approximately(
+        self,
+        value: int | float,
+        future: Future[T] | None = None,
+        margin_absolute: float | None = None,
+        margin_relative: float | None = None,
+    ) -> Waiter[T]:
+        tolerance = Tolerance.from_values(margin_relative, margin_absolute)
+        return self.watch_condition(AlmostEqual(value, tolerance), future)
 
     @overload  # type: ignore[override]
     def __eq__(self, other: SignalContainer[SignalValue]) -> bool: ...
