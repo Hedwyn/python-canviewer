@@ -22,7 +22,7 @@ from typing import (
 import cantools.database
 from cantools.database.can import Database
 
-from ._core import MessageMixin, Node, SignalContainer
+from ._core import MessageMixin, Node, Pilot, SignalContainer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -37,6 +37,22 @@ type BuiltinNameConversions = Literal["camel_to_snake", "canonical"]
 
 NEW_LINES_AFTER_CLS = 2
 DEFAULT_NODE_NAME = "Node"
+MAIN_TEMPLATE = """\
+@click.command()
+@click.option("-c", "--channel", default=None, type=str, help="CAN channel (default: platform-specific)")
+@click.option("-i", "--interface", default=None, type=str, help="CAN interface/driver (default: platform-specific)")
+def main(channel: str | None, interface: str | None) -> None:
+{i}pilot = Pilot({node_cls_name}, channel=channel, interface=interface)
+
+{i}async def _run() -> None:
+{i}{i}async with pilot.run():
+{i}{i}{i}await asyncio.Future()
+
+{i}asyncio.run(_run())
+
+
+if __name__ == "__main__":
+{i}main()"""
 
 
 class NameConversionFn(Protocol):
@@ -264,14 +280,7 @@ def _generate_node(
 
 
 def _generate_main(config: CodegenOptions, node_cls_name: str) -> Iterator[str]:
-    yield 'if __name__ == "__main__":'
-    yield from (
-        config.indent + s
-        for s in [
-            "from pprint import pprint",
-            f"pprint({node_cls_name}())",
-        ]
-    )
+    yield from MAIN_TEMPLATE.format(i=config.indent, node_cls_name=node_cls_name).splitlines()
 
 
 def build_module(
@@ -293,6 +302,14 @@ def build_module(
         f"{SignalContainer.__name__}, {MessageMixin.__name__}, {Node.__name__}",
         "from cantools.database import Message  # noqa: TC002",
     ]
+    if config.generate_main:
+        lines.extend(
+            [
+                "import asyncio",
+                "import click",
+                f"from canviewer.script import {Pilot.__name__}",
+            ]
+        )
     lines.extend(config.add_gap_after_cls())
     if config.add_top_level_signal_aliases:
         lines.append("from functools import cached_property")
