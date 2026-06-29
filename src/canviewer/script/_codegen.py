@@ -39,10 +39,44 @@ NEW_LINES_AFTER_CLS = 2
 DEFAULT_NODE_NAME = "Node"
 MAIN_TEMPLATE = """\
 @click.command()
-@click.option("-c", "--channel", default=None, type=str, help="CAN channel (default: platform-specific)")
-@click.option("-i", "--interface", default=None, type=str, help="CAN interface/driver (default: platform-specific)")
-def main(channel: str | None, interface: str | None) -> None:
-{i}pilot = Pilot({node_cls_name}, channel=channel, interface=interface{node_arg})
+@click.option(
+    "-c", "--channel", default=None, type=str, help="CAN channel (default: platform-specific)"
+)
+@click.option(
+    "-i",
+    "--interface",
+    default=None,
+    type=str,
+    help="CAN interface/driver (default: platform-specific)",
+)
+@click.option(
+    "-l",
+    "--level",
+    default="WARNING",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], case_sensitive=False),
+    help="Logging level",
+)
+@click.option(
+    "-m",
+    "--mask",
+    default=None,
+    type=lambda x: int(x, 0),
+    help="CAN ID mask for extended addressing (hex or decimal)",
+)
+@click.option(
+    "-p",
+    "--prefix",
+    default=None,
+    type=lambda x: int(x, 0),
+    help="CAN ID prefix for extended addressing (hex or decimal)",
+)
+def main(
+    channel: str | None, interface: str | None, level: str, mask: int | None, prefix: int | None
+) -> None:
+{i}logging.basicConfig(level=level)
+{i}pilot = Pilot(
+{i}{i}{node_cls_name}, channel=channel, interface=interface{node_arg}, mask=mask, prefix=prefix
+{i})
 
 {i}async def _run() -> None:
 {i}{i}async with pilot.run():
@@ -304,20 +338,37 @@ def build_module(
     node_name = node_name or DEFAULT_NODE_NAME
     config = config or CodegenOptions()
     sanity_checks(database, config)
-    lines = [
-        "from __future__ import annotations\n",
-        "from dataclasses import dataclass, field",
-        "from typing import Annotated, ClassVar\n",
-        "import cantools.database\n",
-        "from cantools.database.can import Database",
-        "from canviewer.script import "
-        f"{SignalContainer.__name__}, {MessageMixin.__name__}, {Node.__name__}",
-        "from cantools.database import Message  # noqa: TC002",
-    ]
+    lines: list[str] = []
+    if config.generate_main:
+        lines.extend(
+            [
+                "# /// script",
+                '# requires-python = ">=3.12"',
+                "# dependencies = [",
+                '#   "canviewer",',
+                '#   "click",',
+                "# ]",
+                "# ///",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "from __future__ import annotations\n",
+            "from dataclasses import dataclass, field",
+            "from typing import Annotated, ClassVar\n",
+            "import cantools.database\n",
+            "from cantools.database.can import Database",
+            "from canviewer.script import "
+            f"{SignalContainer.__name__}, {MessageMixin.__name__}, {Node.__name__}",
+            "from cantools.database import Message  # noqa: TC002",
+        ]
+    )
     if config.generate_main:
         lines.extend(
             [
                 "import asyncio",
+                "import logging",
                 "import click",
                 f"from canviewer.script import {Pilot.__name__}",
             ]
